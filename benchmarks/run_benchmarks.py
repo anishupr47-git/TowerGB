@@ -1,18 +1,5 @@
 #!/usr/bin/env python
-"""Head-to-head benchmark: TowerGB vs. classical and boosting classifiers.
-
-Compares across four metrics:
-    • Accuracy    — Classification correctness
-    • Log-Loss    — Probabilistic calibration (information-theoretic)
-    • ECE         — Expected Calibration Error (binned)
-    • Latency     — Inference time per batch (ms)
-
-Usage:
-    python benchmarks/run_benchmarks.py
-
-Optional: install xgboost for XGBClassifier comparison:
-    pip install xgboost
-"""
+"""Compare TowerGB speed and accuracy against other models."""
 
 from __future__ import annotations
 
@@ -28,7 +15,7 @@ from sklearn.model_selection import train_test_split
 from towergb import TowerGBClassifier
 from towergb.calibration import compute_ece
 
-# ── Optional XGBoost import ────────────────────────────────────────────
+# Try importing XGBoost if installed
 try:
     from xgboost import XGBClassifier
 
@@ -42,12 +29,8 @@ def _measure_latency(
     X: np.ndarray,
     n_runs: int = 100,
 ) -> float:
-    """Measure mean inference latency in milliseconds.
-
-    Uses ``perf_counter`` for sub-millisecond precision.
-    Runs a warm-up pass before timing.
-    """
-    # Warm-up (JIT caches, branch prediction, etc.)
+    """Measure how many milliseconds it takes to make predictions."""
+    # Warm up first
     model.predict_proba(X)  # type: ignore[union-attr]
 
     start: float = time.perf_counter()
@@ -55,16 +38,16 @@ def _measure_latency(
         model.predict_proba(X)  # type: ignore[union-attr]
     elapsed: float = time.perf_counter() - start
 
-    return (elapsed / n_runs) * 1000.0  # → milliseconds
+    return (elapsed / n_runs) * 1000.0
 
 
 def run_benchmarks() -> None:
-    """Execute the full benchmark suite and print results."""
+    """Train each model and print comparison results."""
     print("=" * 78)
     print(" TowerGB Benchmark Suite")
     print("=" * 78)
 
-    # ── Dataset generation ─────────────────────────────────────────────
+    # Step 1: Create fake dataset
     print("\n[1/3] Generating dataset...")
     X, y = make_classification(
         n_samples=5000,
@@ -78,11 +61,11 @@ def run_benchmarks() -> None:
         X, y, test_size=0.2, random_state=42,
     )
     print(
-        f"    Train: {X_train.shape[0]} samples × {X_train.shape[1]} features"
+        f"    Train: {X_train.shape[0]} samples, {X_train.shape[1]} features"
     )
-    print(f"    Test:  {X_test.shape[0]} samples × 5 classes")
+    print(f"    Test:  {X_test.shape[0]} samples, 5 classes")
 
-    # ── Model definitions ──────────────────────────────────────────────
+    # Step 2: Set up list of models to test
     print("\n[2/3] Training models...")
     models: dict = {
         "TowerGB": TowerGBClassifier(
@@ -106,7 +89,7 @@ def run_benchmarks() -> None:
     else:
         print("    [!] xgboost not installed -- skipping XGBClassifier")
 
-    # ── Training & evaluation ──────────────────────────────────────────
+    # Step 3: Train and measure each model
     results: dict = {}
     for name, model in models.items():
         print(f"    Training {name}...", end=" ", flush=True)
@@ -115,11 +98,9 @@ def run_benchmarks() -> None:
         train_time: float = time.perf_counter() - t0
         print(f"({train_time:.2f}s)")
 
-        # Predictions & probabilities
         y_pred: np.ndarray = model.predict(X_test)
         y_proba: np.ndarray = model.predict_proba(X_test)
 
-        # Metrics
         acc: float = accuracy_score(y_test, y_pred)
         ll: float = log_loss(y_test, y_proba)
         ece: float = compute_ece(y_test, y_proba)
@@ -132,7 +113,7 @@ def run_benchmarks() -> None:
             "Latency (ms)": latency_ms,
         }
 
-    # ── Results table ──────────────────────────────────────────────────
+    # Step 4: Show results table
     print("\n[3/3] Results")
     print("-" * 78)
     header: str = (
@@ -155,7 +136,7 @@ def run_benchmarks() -> None:
     print("-" * 78)
     print(
         "\n[OK] Benchmark complete. "
-        "Lower Log-Loss/ECE/Latency and higher Accuracy is better."
+        "Higher Accuracy is better. Lower Log-Loss/ECE/Latency is better."
     )
 
 

@@ -1,198 +1,86 @@
-"""Core computational engine for TowerGB.
+"""Math tools for TowerGB.
 
-Mathematical primitives for the dual-tower architecture:
-
-    ▸ stable_softmax           — Numerically stable temperature-scaled softmax
-    ▸ cross_entropy_loss_and_grad — Forward CE loss + analytical ∂L/∂W
-    ▸ compute_risk_metrics     — Tower 2 risk signals (log-loss, Brier, Var)
-    ▸ pareto_arbiter           — Cross-tower fitness scoring → ensemble weights
-
-Design invariants:
-    • All operations are fully vectorized (no Python loops over N or D).
-    • Arrays are enforced C-contiguous for CPU cache-line optimization.
-    • BLAS dgemm acceleration via numpy's ``@`` operator for O(N·D·K) matmuls.
+This file contains functions to:
+1. Turn scores into chances that add up to 100% (softmax).
+2. Measure mistakes and calculate how to fix them (loss and gradient).
+3. Check how risky or confident the model is (risk metrics).
+4. Pick the best models to trust the most (arbiter).
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-# ──────────────────────────────────────────────────────────────────────
-# Constants
-# ──────────────────────────────────────────────────────────────────────
-# Machine-epsilon floor to prevent log(0) → -inf.
+# A very small number so we never divide by zero or take log of zero
 _EPS: float = 1e-15
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Softmax
-# ──────────────────────────────────────────────────────────────────────
 def stable_softmax(Z: np.ndarray, temperature: float = 1.0) -> np.ndarray:
-    r"""Numerically stable row-wise softmax with temperature scaling.
+    """Turn numbers into probabilities that add up to 1 for each row.
 
-    .. math::
-
-        P_{ik} = \frac{\exp\!\bigl(Z_{ik}/T - \max_j Z_{ij}/T\bigr)}
-                      {\sum_j \exp\!\bigl(Z_{ij}/T - \max_j Z_{ij}/T\bigr)}
-
-    The ``max``-subtraction trick eliminates overflow for arbitrarily large
-    logits (tested up to :math:`|Z| > 10^4`) while preserving exact
-    mathematical equivalence — the shift cancels in the ratio.
-
-    Parameters
-    ----------
-    Z : np.ndarray, shape ``(N, K)``
-        Raw logit matrix.  Forced C-contiguous for cache efficiency.
-    temperature : float, default 1.0
-        Temperature scaling :math:`T > 0`.
-        *Higher* T → softer (more uniform) distribution.
-        *Lower*  T → sharper (toward hard argmax).
-
-    Returns
-    -------
-    P : np.ndarray, shape ``(N, K)``, dtype ``float64``
-        Row-stochastic probability matrix (:math:`\sum_k P_{ik} = 1`).
+    High numbers get higher chances.
+    Temperature changes how confident the chances look.
     """
-    # Enforce C-contiguous float64 layout for optimal cache utilization
+    # Make sure numbers are stored cleanly in memory
     Z_c: np.ndarray = np.ascontiguousarray(Z, dtype=np.float64)
 
-    # Temperature-scaled logits with per-row max subtraction
+    # Scale numbers by temperature and subtract the max so numbers do not blow up
     Z_scaled: np.ndarray = Z_c / temperature
     Z_shifted: np.ndarray = Z_scaled - Z_scaled.max(axis=1, keepdims=True)
 
-    # Vectorized exponentiation and row-normalization
+    # Exponentiate and divide by total so every row adds up to 1
     exp_Z: np.ndarray = np.exp(Z_shifted)
     P: np.ndarray = exp_Z / exp_Z.sum(axis=1, keepdims=True)
 
     return P
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Cross-Entropy Loss + Gradient
-# ──────────────────────────────────────────────────────────────────────
 def cross_entropy_loss_and_grad(
     X: np.ndarray,
     Y_one_hot: np.ndarray,
     W: np.ndarray,
     temperature: float = 1.0,
 ) -> tuple[float, np.ndarray]:
-    r"""Compute mean cross-entropy loss and its analytical gradient w.r.t. W.
+    """Calculate the mistake score (loss) and how to change weights to fix it (gradient).
 
-    **Forward pass:**
-
-    .. math::
-
-        \text{logits} = X\,W,\qquad P = \operatorname{softmax}\!\left(
-        \frac{\text{logits}}{T}\right)
-
-    **Loss (mean cross-entropy):**
-
-    .. math::
-
-        \mathcal{L} = -\frac{1}{N}\sum_{i=1}^{N}\sum_{k=1}^{K}
-                       Y_{ik}\,\ln(P_{ik} + \varepsilon)
-
-    **Gradient (softmax–CE Jacobian identity):**
-
-    .. math::
-
-        \frac{\partial\mathcal{L}}{\partial W}
-        = \frac{1}{N \cdot T}\,X^\top\!(P - Y)
-
-    The elegant residual form :math:`(P - Y)` arises because the Jacobian
-    :math:`\partial P / \partial\,\text{logits}` contracted with the CE
-    derivative collapses to a single subtraction.
-
-    Parameters
-    ----------
-    X : np.ndarray, shape ``(N, D)``
-        Feature matrix (C-contiguous preferred).
-    Y_one_hot : np.ndarray, shape ``(N, K)``
-        One-hot encoded target matrix.
-    W : np.ndarray, shape ``(D, K)``
-        Weight matrix mapping features → class logits.
-    temperature : float, default 1.0
-        Softmax temperature scaling.
-
-    Returns
-    -------
-    loss : float
-        Scalar mean cross-entropy loss.
-    grad : np.ndarray, shape ``(D, K)``
-        Analytical gradient :math:`\partial\mathcal{L}/\partial W`.
+    X: input data table
+    Y_one_hot: correct answers (1 for true class, 0 for others)
+    W: weights used for guessing
+    temperature: confidence scaler
     """
     N: int = X.shape[0]
 
-    # Forward: logits → probabilities via temperature-scaled softmax
-    # Single BLAS dgemm call for the N×D @ D×K multiply
-    logits: np.ndarray = X @ W  # (N, K)
+    # Calculate scores and turn them into chances
+    logits: np.ndarray = X @ W
     P: np.ndarray = stable_softmax(logits, temperature)
 
-    # Cross-entropy with ε-floor to prevent log(0)
+    # Calculate how wrong the guesses are on average
     loss_val: float = float(
         -np.sum(Y_one_hot * np.log(np.maximum(P, _EPS))) / N
     )
 
-    # Gradient via softmax–CE residual identity: dL/dW = X^T(P−Y) / (N·T)
-    residual: np.ndarray = P - Y_one_hot  # (N, K)
-    grad: np.ndarray = (X.T @ residual) / (N * temperature)  # (D, K) — single dgemm
+    # Calculate the direction to adjust weights to reduce mistakes
+    residual: np.ndarray = P - Y_one_hot
+    grad: np.ndarray = (X.T @ residual) / (N * temperature)
 
     return loss_val, grad
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Tower 2: Risk Metrics
-# ──────────────────────────────────────────────────────────────────────
 def compute_risk_metrics(
     P: np.ndarray,
     Y_one_hot: np.ndarray,
 ) -> dict[str, float]:
-    r"""Compute Tower 2 risk and calibration metrics.
+    """Check how good, careful, and steady the predictions are.
 
-    Three complementary signals quantify prediction quality:
-
-    1. **Log-loss** (information-theoretic divergence):
-
-       .. math::
-
-           \bar{\mathcal{L}} = -\frac{1}{N}\sum_{i}\sum_{k}
-                                Y_{ik}\,\ln P_{ik}
-
-    2. **Brier score** (proper scoring rule, L2 in probability space):
-
-       .. math::
-
-           \mathcal{B} = \frac{1}{N}\sum_{i}\sum_{k}
-                          (P_{ik} - Y_{ik})^2
-
-    3. **Sample-wise loss variance** (calibration stability):
-
-       .. math::
-
-           \operatorname{Var}(\mathcal{L}) =
-           \operatorname{Var}\!\left(\left\{
-           -\sum_k Y_{ik}\ln P_{ik}\right\}_{i=1}^N\right)
-
-       High variance signals inconsistent confidence — the model is
-       certain on some samples but uncertain on others, a hallmark
-       of poor calibration.
-
-    Parameters
-    ----------
-    P : np.ndarray, shape ``(N, K)``
-        Predicted probability matrix (row-stochastic).
-    Y_one_hot : np.ndarray, shape ``(N, K)``
-        One-hot encoded targets.
-
-    Returns
-    -------
-    metrics : dict
-        Keys: ``'log_loss'``, ``'brier'``, ``'loss_var'``.
+    Returns:
+    - log_loss: average mistake size
+    - brier: difference between guess chance and true answer squared
+    - loss_var: how steady the model is across different rows
     """
-    # ε-clamped probabilities — fully vectorized
+    # Keep chances safe from zero
     P_safe: np.ndarray = np.maximum(P, _EPS)
 
-    # Per-sample cross-entropy losses: shape (N,)
+    # Check mistakes for each row
     sample_losses: np.ndarray = -np.sum(Y_one_hot * np.log(P_safe), axis=1)
 
     return {
@@ -202,54 +90,21 @@ def compute_risk_metrics(
     }
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Cross-Tower Pareto Arbiter
-# ──────────────────────────────────────────────────────────────────────
 def pareto_arbiter(
     metrics_list: list[dict[str, float]],
     weights: dict[str, float],
 ) -> np.ndarray:
-    r"""Cross-Tower Pareto Arbiter for multi-pass ensemble weighting.
+    """Give a score to each round of training and pick who gets more vote.
 
-    Computes a composite fitness score per training pass:
-
-    .. math::
-
-        F_m = w_{\text{acc}}\!\cdot\!\text{Acc}_m
-            - w_{\text{brier}}\!\cdot\!\mathcal{B}_m
-            - w_{\text{loss}}\!\cdot\!\bar{\mathcal{L}}_m
-            - w_{\text{var}}\!\cdot\!\operatorname{Var}(\mathcal{L}_m)
-
-    Then applies softmax to yield ensemble weights:
-
-    .. math::
-
-        \alpha_m = \frac{\exp(F_m)}{\sum_j \exp(F_j)}
-
-    Passes with higher fitness (better accuracy, lower loss/risk) receive
-    proportionally greater weight in the final soft-probability ensemble.
-
-    Parameters
-    ----------
-    metrics_list : list of dict
-        Per-pass metrics. Each dict: ``'accuracy'``, ``'log_loss'``,
-        ``'brier'``, ``'loss_var'``.
-    weights : dict
-        Arbiter coefficients: ``'accuracy'``, ``'log_loss'``, ``'brier'``,
-        ``'loss_var'``.
-
-    Returns
-    -------
-    ensemble_weights : np.ndarray, shape ``(M,)``
-        Softmax-normalized ensemble weights (:math:`\sum_m \alpha_m = 1`).
+    Rounds with higher accuracy and lower mistakes get higher votes.
     """
-    # Extract arbiter coefficients with sensible defaults
+    # Get importance weights for each metric
     w_acc: float = weights.get("accuracy", 1.0)
     w_brier: float = weights.get("brier", 0.5)
     w_loss: float = weights.get("log_loss", 0.5)
     w_var: float = weights.get("loss_var", 0.3)
 
-    # Vectorize metric extraction → O(M) numpy ops instead of scalar loop
+    # Collect numbers from all rounds
     accs: np.ndarray = np.array(
         [m.get("accuracy", 0.0) for m in metrics_list], dtype=np.float64
     )
@@ -263,12 +118,12 @@ def pareto_arbiter(
         [m.get("loss_var", 0.0) for m in metrics_list], dtype=np.float64
     )
 
-    # Composite fitness: vectorized linear combination
+    # Calculate overall grade for each round
     fitness: np.ndarray = (
         w_acc * accs - w_brier * briers - w_loss * log_losses - w_var * loss_vars
     )
 
-    # Softmax with max-subtraction for numerical stability
+    # Turn grades into vote percentages that add up to 100%
     fitness_shifted: np.ndarray = fitness - fitness.max()
     exp_fitness: np.ndarray = np.exp(fitness_shifted)
     ensemble_weights: np.ndarray = exp_fitness / exp_fitness.sum()

@@ -1,6 +1,6 @@
 # TowerGB
 
-> **Zero-heavy-dependency, high-performance, dual-tower calibrated ensemble meta-learner for tabular classification.**
+TowerGB is a fast and simple machine learning model for tabular data (data in rows and columns). It predicts which category a row belongs to.
 
 [![CI](https://github.com/anishupr47-git/TableGB/actions/workflows/ci.yml/badge.svg)](https://github.com/anishupr47-git/TableGB/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
@@ -8,141 +8,122 @@
 
 ---
 
-## Architecture
+## How It Works
 
-TowerGB implements a **dual-tower + arbiter** ensemble architecture for tabular classification:
+TowerGB works in four simple steps:
 
-```
-┌───────────────────────────────────────────────────────────┐
-│                   TowerGBClassifier                       │
-│                                                           │
-│  ┌─────────────────────┐   ┌─────────────────────────┐    │
-│  │  Tower 1: Accuracy   │   │  Tower 2: Calibration   │   │
-│  │  & Ranking Engine    │   │  & Risk Engine          │   │
-│  │                      │   │                         │   │
-│  │  • M-pass bootstrap  │   │  • Log-loss             │   │
-│  │  • Empirical acc.    │   │  • Brier score          │   │
-│  │  • OOB evaluation    │   │  • Sample-wise Var(L)   │   │
-│  └──────────┬───────────┘   └────────────┬────────────┘   │
-│             │                            │                │
-│             └──────────┬─────────────────┘                │
-│                        ▼                                  │
-│            ┌──────────────────────┐                       │
-│            │  Pareto Arbiter      │                       │
-│            │  F = w·Acc − w·B     │                       │
-│            │    − w·L̄ − w·Var(L) │                       │
-│            │  α = softmax(F)      │                       │
-│            └──────────┬───────────┘                       │
-│                       ▼                                   │
-│            ┌──────────────────────┐                       │
-│            │  Temperature         │                       │
-│            │  Calibration (ECE)   │                       │
-│            │  Golden-section opt  │                       │
-│            └──────────────────────┘                       │
-└───────────────────────────────────────────────────────────┘
-```
+1. **Tower 1 (Accuracy)**: Trains several rounds of models and checks how many answers each round gets right.
+2. **Tower 2 (Risk and Confidence)**: Checks how steady and careful each round is so it avoids making overconfident mistakes.
+3. **Arbiter**: Combines the rounds by giving more voting power to the rounds that are accurate and steady.
+4. **Calibration**: Tunes confidence percentages so when the model says it is 80% sure, it really is right 80% of the time.
 
-### Key Design Principles
+---
 
-- **Zero Heavy Dependencies**: Only `numpy` and `scikit-learn` validation primitives at runtime
-- **Vectorized Computation**: C-contiguous array layouts, BLAS-accelerated matrix ops, no Python row/feature loops
-- **Time Complexity**: O(N·D·K) per training pass
-- **Space Complexity**: O(N·K + D·K) memory footprint
-- **scikit-learn Compatible**: Full `BaseEstimator` / `ClassifierMixin` compliance
+## Key Features
+
+- **No heavy dependencies**: Only uses NumPy and Scikit-Learn.
+- **Fast**: Fast training and sub-millisecond predictions.
+- **Scikit-Learn Compatible**: Works with standard tools like pipelines and cross-validation.
 
 ---
 
 ## Installation
 
 ```bash
-# From source (editable install)
+# Clone the repository
 git clone https://github.com/anishupr47-git/TableGB.git
 cd TableGB
+
+# Create a virtual environment
 python -m venv .venv
-# Windows
+
+# Activate on Windows:
 .venv\Scripts\activate
-# macOS/Linux
+
+# Or activate on macOS/Linux:
 # source .venv/bin/activate
+
+# Install the package and test tools
 pip install -e ".[test]"
 ```
 
 ---
 
-## Quick Start
+## Quick Example
 
 ```python
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from towergb import TowerGBClassifier
 
-# Generate data
+# 1. Create example table data
 X, y = make_classification(n_samples=1000, n_features=20, n_classes=3,
                            n_informative=10, random_state=42)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Train
-clf = TowerGBClassifier(n_passes=5, learning_rate=0.05, random_state=42)
+# 2. Create and train the model
+clf = TowerGBClassifier(n_passes=5, learning_rate=0.1, random_state=42)
 clf.fit(X_train, y_train)
 
-# Predict
+# 3. Check accuracy
 print(f"Accuracy: {clf.score(X_test, y_test):.4f}")
 
-# Calibrate (post-hoc temperature scaling)
+# 4. Tune confidence probabilities
 clf.calibrate(X_test, y_test)
 proba = clf.predict_proba(X_test)
-print(f"Calibrated probabilities shape: {proba.shape}")
+print(f"Probabilities shape: {proba.shape}")
 ```
 
 ---
 
-## API Reference
+## Settings and Options
 
-### `TowerGBClassifier`
+### `TowerGBClassifier` Parameters
 
-| Parameter | Type | Default | Description |
+| Parameter | Type | Default | What it does |
 |---|---|---|---|
-| `n_passes` | `int` | `5` | Number of bootstrap training passes (M) |
-| `learning_rate` | `float` | `0.05` | Gradient descent step size |
-| `max_iter` | `int` | `200` | Max gradient descent iterations per pass |
-| `temperature` | `float` | `1.0` | Initial softmax temperature T > 0 |
-| `subsample_ratio` | `float` | `0.8` | Bootstrap subsample fraction |
-| `tol` | `float` | `1e-6` | Convergence tolerance |
-| `random_state` | `int \| None` | `None` | Random seed |
-| `arbiter_weights` | `dict \| None` | `None` | Custom Pareto arbiter weights |
+| `n_passes` | `int` | `5` | Number of training rounds |
+| `learning_rate` | `float` | `0.1` | Step size when learning |
+| `max_iter` | `int` | `300` | Maximum learning steps per round |
+| `temperature` | `float` | `1.0` | Starting confidence scale |
+| `subsample_ratio` | `float` | `0.8` | Percentage of data used per round |
+| `tol` | `float` | `1e-6` | Stop learning when error stops changing |
+| `random_state` | `int \| None` | `None` | Random seed for repeatable results |
+| `arbiter_weights` | `dict \| None` | `None` | Custom voting importance weights |
 
-#### Methods
+### Main Methods
 
-| Method | Description |
+| Method | What it does |
 |---|---|
-| `.fit(X, y)` | Train the dual-tower ensemble |
-| `.predict(X)` | Return class predictions |
-| `.predict_proba(X)` | Return calibrated probability estimates |
-| `.calibrate(X_val, y_val)` | Post-hoc temperature calibration via ECE minimization |
-| `.score(X, y)` | Classification accuracy |
+| `.fit(X, y)` | Trains the model on table data |
+| `.predict(X)` | Predicts the category for each row |
+| `.predict_proba(X)` | Gives percentage chances for each category |
+| `.calibrate(X_val, y_val)` | Tunes confidence scores on test data |
+| `.score(X, y)` | Calculates accuracy score |
 
 ---
 
-## Testing
+## Running Tests
 
 ```bash
-# Run full test suite
+# Run all tests
 pytest tests/ -v
 
-# Run with coverage
+# Run with test coverage
 pytest tests/ -v --cov=towergb --cov-report=term-missing
 ```
 
-## Benchmarks
+---
+
+## Running Benchmarks
 
 ```bash
-# Install benchmark dependencies
+# Install benchmark tools
 pip install -e ".[benchmark]"
 
-# Run head-to-head comparison
+# Run speed and accuracy comparison
 python benchmarks/run_benchmarks.py
 ```
-
-Compares TowerGB against LogisticRegression, RandomForest, and XGBClassifier across Accuracy, Log-Loss, ECE, and Inference Latency.
 
 ---
 
