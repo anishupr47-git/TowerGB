@@ -7,32 +7,20 @@ import numpy as np
 from towergb._engine import cross_entropy_loss_and_grad
 
 
-def _numerical_gradient(
-    X: np.ndarray,
-    Y_one_hot: np.ndarray,
-    W: np.ndarray,
-    temperature: float,
-    h: float = 1e-5,
-) -> np.ndarray:
-    # Nudge each weight a tiny bit up and down to check the slope manually
+def _numerical_gradient(X: np.ndarray, Y_one_hot: np.ndarray, W: np.ndarray, temperature: float, h: float = 1e-5) -> np.ndarray:
     D, K = W.shape
-    num_grad: np.ndarray = np.zeros_like(W)
+    num_grad = np.zeros_like(W)
 
     for i in range(D):
         for j in range(K):
             W_plus = W.copy()
             W_plus[i, j] += h
-            loss_plus, _ = cross_entropy_loss_and_grad(
-                X, Y_one_hot, W_plus, temperature
-            )
+            loss_plus, _ = cross_entropy_loss_and_grad(X, Y_one_hot, W_plus, temperature)
 
             W_minus = W.copy()
             W_minus[i, j] -= h
-            loss_minus, _ = cross_entropy_loss_and_grad(
-                X, Y_one_hot, W_minus, temperature
-            )
+            loss_minus, _ = cross_entropy_loss_and_grad(X, Y_one_hot, W_minus, temperature)
 
-            # Slope formula: change in loss divided by 2 times step size
             num_grad[i, j] = (loss_plus - loss_minus) / (2.0 * h)
 
     return num_grad
@@ -42,7 +30,6 @@ class TestGradientCheck:
     """Make sure analytical formula matches the manual slope checks."""
 
     def test_gradient_matches_numerical_temperature_1(self) -> None:
-        # Check temperature = 1.0
         rng = np.random.RandomState(42)
         N, D, K = 20, 5, 3
 
@@ -53,16 +40,13 @@ class TestGradientCheck:
         Y_one_hot[np.arange(N), y_idx] = 1.0
 
         temperature = 1.0
-        _, analytical_grad = cross_entropy_loss_and_grad(
-            X, Y_one_hot, W, temperature
-        )
+        _, analytical_grad = cross_entropy_loss_and_grad(X, Y_one_hot, W, temperature)
         numerical_grad = _numerical_gradient(X, Y_one_hot, W, temperature)
 
         max_diff = float(np.max(np.abs(analytical_grad - numerical_grad)))
         assert max_diff < 1e-7
 
     def test_gradient_matches_numerical_temperature_1_5(self) -> None:
-        # Check temperature = 1.5
         rng = np.random.RandomState(123)
         N, D, K = 30, 8, 4
 
@@ -73,16 +57,13 @@ class TestGradientCheck:
         Y_one_hot[np.arange(N), y_idx] = 1.0
 
         temperature = 1.5
-        _, analytical_grad = cross_entropy_loss_and_grad(
-            X, Y_one_hot, W, temperature
-        )
+        _, analytical_grad = cross_entropy_loss_and_grad(X, Y_one_hot, W, temperature)
         numerical_grad = _numerical_gradient(X, Y_one_hot, W, temperature)
 
         max_diff = float(np.max(np.abs(analytical_grad - numerical_grad)))
         assert max_diff < 1e-7
 
     def test_gradient_matches_numerical_temperature_0_5(self) -> None:
-        # Check temperature = 0.5
         rng = np.random.RandomState(7)
         N, D, K = 15, 4, 2
 
@@ -93,16 +74,13 @@ class TestGradientCheck:
         Y_one_hot[np.arange(N), y_idx] = 1.0
 
         temperature = 0.5
-        _, analytical_grad = cross_entropy_loss_and_grad(
-            X, Y_one_hot, W, temperature
-        )
+        _, analytical_grad = cross_entropy_loss_and_grad(X, Y_one_hot, W, temperature)
         numerical_grad = _numerical_gradient(X, Y_one_hot, W, temperature)
 
         max_diff = float(np.max(np.abs(analytical_grad - numerical_grad)))
         assert max_diff < 1e-7
 
     def test_gradient_zero_at_perfect_fit(self) -> None:
-        # When answers are 100% correct, gradient slope should be almost zero
         rng = np.random.RandomState(99)
         N, D, K = 10, 3, 2
 
@@ -116,5 +94,4 @@ class TestGradientCheck:
             W[i, y_idx[i]] = 100.0
 
         _, grad = cross_entropy_loss_and_grad(X, Y_one_hot, W, temperature=1.0)
-
         assert np.max(np.abs(grad)) < 1e-6

@@ -17,17 +17,14 @@ from towergb.calibration import compute_ece
 
 @pytest.fixture
 def binary_data() -> tuple:
-    # Create simple 2-class dataset for testing
     X, y = make_classification(
-        n_samples=200, n_features=10, n_classes=2,
-        n_informative=6, random_state=42,
+        n_samples=200, n_features=10, n_classes=2, n_informative=6, random_state=42,
     )
     return train_test_split(X, y, test_size=0.3, random_state=42)
 
 
 @pytest.fixture
 def multiclass_data() -> tuple:
-    # Create simple 5-class dataset for testing
     X, y = make_classification(
         n_samples=300, n_features=15, n_classes=5,
         n_informative=10, n_clusters_per_class=1, random_state=42,
@@ -40,10 +37,7 @@ class TestSklearnCompliance:
 
     def test_check_estimator(self) -> None:
         from sklearn.utils.estimator_checks import check_estimator
-
-        clf = TowerGBClassifier(
-            n_passes=2, max_iter=30, random_state=42
-        )
+        clf = TowerGBClassifier(n_passes=2, max_iter=30, random_state=42)
         check_estimator(clf)
 
 
@@ -52,12 +46,10 @@ class TestFitPredict:
 
     def test_binary_classification(self, binary_data: tuple) -> None:
         X_train, X_test, y_train, y_test = binary_data
-
         clf = TowerGBClassifier(n_passes=3, max_iter=100, random_state=42)
         result = clf.fit(X_train, y_train)
 
         assert result is clf
-
         y_pred = clf.predict(X_test)
         assert y_pred.shape == (len(X_test),)
         assert set(y_pred).issubset(set(clf.classes_))
@@ -70,7 +62,6 @@ class TestFitPredict:
 
     def test_multiclass_classification(self, multiclass_data: tuple) -> None:
         X_train, X_test, y_train, y_test = multiclass_data
-
         clf = TowerGBClassifier(n_passes=5, max_iter=150, random_state=42)
         clf.fit(X_train, y_train)
 
@@ -81,36 +72,28 @@ class TestFitPredict:
         assert set(y_pred).issubset(set(clf.classes_))
         assert proba.shape == (len(X_test), 5)
         np.testing.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-12)
-
-        accuracy = clf.score(X_test, y_test)
-        assert accuracy > 0.2
+        assert clf.score(X_test, y_test) > 0.2
 
     def test_score_method(self, binary_data: tuple) -> None:
         X_train, X_test, y_train, y_test = binary_data
-
         clf = TowerGBClassifier(n_passes=2, max_iter=50, random_state=42)
         clf.fit(X_train, y_train)
-
         score = clf.score(X_test, y_test)
         assert 0.0 <= score <= 1.0
 
     def test_classes_attribute(self) -> None:
         X = np.array([[1, 2], [3, 4], [5, 6], [7, 8]], dtype=np.float64)
         y = np.array([2, 0, 1, 2])
-
         clf = TowerGBClassifier(n_passes=2, max_iter=20, random_state=42)
         clf.fit(X, y)
-
         np.testing.assert_array_equal(clf.classes_, [0, 1, 2])
 
     def test_n_features_in(self) -> None:
         rng = np.random.RandomState(42)
         X = rng.randn(50, 7)
         y = rng.randint(0, 3, size=50)
-
         clf = TowerGBClassifier(n_passes=2, max_iter=20, random_state=42)
         clf.fit(X, y)
-
         assert clf.n_features_in_ == 7
 
 
@@ -161,7 +144,6 @@ class TestDataFrameInput:
 
         y_pred = clf.predict(X_df)
         assert y_pred.shape == (50,)
-
         proba = clf.predict_proba(X_df)
         assert proba.shape == (50, 3)
 
@@ -171,7 +153,6 @@ class TestSerialization:
 
     def test_pickle_roundtrip(self, binary_data: tuple) -> None:
         X_train, X_test, y_train, _ = binary_data
-
         clf = TowerGBClassifier(n_passes=3, max_iter=50, random_state=42)
         clf.fit(X_train, y_train)
         original_pred = clf.predict(X_test)
@@ -181,9 +162,7 @@ class TestSerialization:
         clf_loaded = pickle.loads(serialized)
 
         np.testing.assert_array_equal(clf_loaded.predict(X_test), original_pred)
-        np.testing.assert_allclose(
-            clf_loaded.predict_proba(X_test), original_proba, atol=1e-14
-        )
+        np.testing.assert_allclose(clf_loaded.predict_proba(X_test), original_proba, atol=1e-14)
 
     def test_joblib_roundtrip(self, binary_data: tuple) -> None:
         joblib = pytest.importorskip("joblib")
@@ -197,9 +176,7 @@ class TestSerialization:
             joblib.dump(clf, f.name)
             clf_loaded = joblib.load(f.name)
 
-        np.testing.assert_allclose(
-            clf_loaded.predict_proba(X_test), original_proba, atol=1e-14
-        )
+        np.testing.assert_allclose(clf_loaded.predict_proba(X_test), original_proba, atol=1e-14)
 
 
 class TestCalibration:
@@ -207,30 +184,22 @@ class TestCalibration:
 
     def test_calibrate_updates_temperature(self, binary_data: tuple) -> None:
         X_train, X_test, y_train, y_test = binary_data
-
         clf = TowerGBClassifier(n_passes=3, max_iter=100, random_state=42)
         clf.fit(X_train, y_train)
 
         assert clf.temperature_ == clf.temperature
         clf.calibrate(X_test, y_test)
-
         assert isinstance(clf.temperature_, float)
         assert clf.temperature_ > 0.0
 
     def test_calibrate_returns_self(self, binary_data: tuple) -> None:
         X_train, X_test, y_train, y_test = binary_data
-
         clf = TowerGBClassifier(n_passes=2, max_iter=50, random_state=42)
         clf.fit(X_train, y_train)
+        assert clf.calibrate(X_test, y_test) is clf
 
-        result = clf.calibrate(X_test, y_test)
-        assert result is clf
-
-    def test_calibration_reduces_or_maintains_ece(
-        self, binary_data: tuple
-    ) -> None:
+    def test_calibration_reduces_or_maintains_ece(self, binary_data: tuple) -> None:
         X_train, X_test, y_train, y_test = binary_data
-
         clf = TowerGBClassifier(n_passes=5, max_iter=150, random_state=42)
         clf.fit(X_train, y_train)
 
@@ -238,7 +207,6 @@ class TestCalibration:
         ece_before = compute_ece(y_test, proba_before)
 
         clf.calibrate(X_test, y_test)
-
         proba_after = clf.predict_proba(X_test)
         ece_after = compute_ece(y_test, proba_after)
 
@@ -260,9 +228,7 @@ class TestReproducibility:
         clf2.fit(X, y)
 
         np.testing.assert_array_equal(clf1.predict(X), clf2.predict(X))
-        np.testing.assert_allclose(
-            clf1.predict_proba(X), clf2.predict_proba(X), atol=1e-14
-        )
+        np.testing.assert_allclose(clf1.predict_proba(X), clf2.predict_proba(X), atol=1e-14)
 
     def test_different_seed_different_predictions(self) -> None:
         rng = np.random.RandomState(42)
@@ -289,7 +255,6 @@ class TestErrorHandling:
     def test_regression_target_raises(self) -> None:
         X = np.array([[1, 2], [3, 4], [5, 6]], dtype=np.float64)
         y = np.array([0.1, 0.5, 0.9])
-
         clf = TowerGBClassifier()
         with pytest.raises(ValueError, match="Unknown label type"):
             clf.fit(X, y)
