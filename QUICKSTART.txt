@@ -1,0 +1,73 @@
+==============================================================================
+TOWERGB QUICK START GUIDE
+==============================================================================
+
+WHAT IS TOWERGB?
+----------------
+TowerGB is an AI tool that looks at a table of numbers and learns how
+to guess which category each row belongs to.
+
+For example:
+- Given age, income, and city -> guess if a person buys product A or B.
+- Given leaf size and petal color -> guess which flower species it is.
+
+
+HOW TO SET IT UP (3 SIMPLE STEPS)
+---------------------------------
+
+Step 1: Open a terminal in this folder.
+
+Step 2: Turn on your Python environment:
+    Windows:      .venv\Scripts\activate
+    Mac / Linux:  source .venv/bin/activate
+
+Step 3: Install TowerGB:
+    pip install -e .
+
+
+HOW TO USE IT IN PYTHON (COPY & PASTE)
+--------------------------------------
+
+from sklearn.datasets import make_classification
+from towergb import TowerGBClassifier
+
+# 1. Make some sample table data (100 rows, 4 columns, 2 categories)
+X, y = make_classification(n_samples=100, n_features=4, n_classes=2, random_state=42)
+
+# 2. Create the model
+clf = TowerGBClassifier()
+
+# 3. Teach the model using the data
+clf.fit(X, y)
+
+# 4. Make guesses for the first 3 rows
+guesses = clf.predict(X[:3])
+print("My guesses:", guesses)
+
+# 5. Check percentage chances (like 90% Cat, 10% Dog)
+chances = clf.predict_proba(X[:3])
+print("My percentage chances:\n", chances)
+
+# 6. Check accuracy score (1.0 means 100% correct)
+print("Accuracy:", clf.score(X, y))
+
+
+HOW TO RUN TESTS
+----------------
+To make sure everything is working perfectly on your machine, run:
+
+    pytest tests/ -v
+
+All 39 tests will pass with green checkmarks!
+
+
+HOW TO RUN THE SPEED RACE (BENCHMARK)
+-------------------------------------
+To see how fast TowerGB predicts compared to other models:
+
+    python benchmarks/run_benchmarks.py
+
+
+THAT'S IT!
+You are now ready to use TowerGB on any table dataset.
+==============================================================================
