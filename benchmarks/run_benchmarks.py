@@ -24,18 +24,21 @@ except ImportError:
     _HAS_XGB = False
 
 
+from typing import Any
+
+
 def _measure_latency(
-    model: object,
+    model: Any,
     X: np.ndarray,
     n_runs: int = 100,
 ) -> float:
     """Measure how many milliseconds it takes to make predictions."""
     # Warm up first
-    model.predict_proba(X)  # type: ignore[union-attr]
+    model.predict_proba(X)
 
     start: float = time.perf_counter()
     for _ in range(n_runs):
-        model.predict_proba(X)  # type: ignore[union-attr]
+        model.predict_proba(X)
     elapsed: float = time.perf_counter() - start
 
     return (elapsed / n_runs) * 1000.0
