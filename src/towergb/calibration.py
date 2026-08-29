@@ -36,15 +36,16 @@ def compute_ece(
     bin_boundaries: np.ndarray = np.linspace(0.0, 1.0, n_bins + 1)
     bin_indices: np.ndarray = np.digitize(confidences, bin_boundaries[1:-1])
 
-    # Check each bucket and see if confidence matches actual accuracy
-    ece: float = 0.0
-    for b in range(n_bins):
-        mask: np.ndarray = bin_indices == b
-        n_b: int = int(mask.sum())
-        if n_b > 0:
-            acc_b: float = float(correct[mask].mean())
-            conf_b: float = float(confidences[mask].mean())
-            ece += (n_b / N) * abs(acc_b - conf_b)
+    # Count samples, correct answers, and confidence totals for each bucket in one C pass
+    counts: np.ndarray = np.bincount(bin_indices, minlength=n_bins)
+    correct_sums: np.ndarray = np.bincount(bin_indices, weights=correct, minlength=n_bins)
+    conf_sums: np.ndarray = np.bincount(bin_indices, weights=confidences, minlength=n_bins)
+
+    # Only look at buckets that have at least one sample
+    has_samples: np.ndarray = counts > 0
+    acc_b: np.ndarray = correct_sums[has_samples] / counts[has_samples]
+    conf_b: np.ndarray = conf_sums[has_samples] / counts[has_samples]
+    ece: float = float(np.sum((counts[has_samples] / N) * np.abs(acc_b - conf_b)))
 
     return ece
 
