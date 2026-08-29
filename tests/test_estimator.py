@@ -97,6 +97,79 @@ class TestFitPredict:
         assert clf.n_features_in_ == 7
 
 
+class TestFeatureImportancesAndCoef:
+    """Test feature importance ranking and weight coefficients."""
+
+    def test_feature_importances_shape_and_sum(self, binary_data: tuple) -> None:
+        X_train, _, y_train, _ = binary_data
+        clf = TowerGBClassifier(n_passes=3, max_iter=50, random_state=42)
+        clf.fit(X_train, y_train)
+
+        assert hasattr(clf, "feature_importances_")
+        assert clf.feature_importances_.shape == (10,)
+        np.testing.assert_allclose(clf.feature_importances_.sum(), 1.0, atol=1e-6)
+        assert np.all(clf.feature_importances_ >= 0.0)
+
+    def test_coef_attribute(self, binary_data: tuple, multiclass_data: tuple) -> None:
+        X_bin, _, y_bin, _ = binary_data
+        clf_bin = TowerGBClassifier(n_passes=2, max_iter=30, random_state=42)
+        clf_bin.fit(X_bin, y_bin)
+        assert hasattr(clf_bin, "coef_")
+        assert clf_bin.coef_.shape == (1, 10)
+
+        X_multi, _, y_multi, _ = multiclass_data
+        clf_multi = TowerGBClassifier(n_passes=2, max_iter=30, random_state=42)
+        clf_multi.fit(X_multi, y_multi)
+        assert clf_multi.coef_.shape == (5, 15)
+
+
+class TestClassWeightAndSampleWeight:
+    """Test handling imbalanced classes and sample weights."""
+
+    def test_class_weight_balanced(self) -> None:
+        rng = np.random.RandomState(42)
+        X = rng.randn(100, 4)
+        y = np.array([0] * 90 + [1] * 10)
+        clf = TowerGBClassifier(n_passes=3, max_iter=50, class_weight="balanced", random_state=42)
+        clf.fit(X, y)
+        preds = clf.predict(X)
+        assert len(preds) == 100
+
+    def test_sample_weight_fit(self, binary_data: tuple) -> None:
+        X_train, X_test, y_train, y_test = binary_data
+        weights = np.ones(len(y_train), dtype=np.float64)
+        weights[:20] = 5.0
+        clf = TowerGBClassifier(n_passes=2, max_iter=50, random_state=42)
+        clf.fit(X_train, y_train, sample_weight=weights)
+        assert clf.score(X_test, y_test) > 0.4
+
+
+class TestL2Regularization:
+    """Test weight shrinkage with L2 regularization."""
+
+    def test_l2_regularization_effect(self, binary_data: tuple) -> None:
+        X_train, _, y_train, _ = binary_data
+        clf_noreg = TowerGBClassifier(n_passes=3, max_iter=100, l2_reg=0.0, random_state=42)
+        clf_noreg.fit(X_train, y_train)
+
+        clf_reg = TowerGBClassifier(n_passes=3, max_iter=100, l2_reg=1.0, random_state=42)
+        clf_reg.fit(X_train, y_train)
+
+        norm_noreg = float(np.linalg.norm(clf_noreg._W_ensemble))
+        norm_reg = float(np.linalg.norm(clf_reg._W_ensemble))
+        assert norm_reg < norm_noreg
+
+
+class TestParallelTraining:
+    """Test parallel bootstrap training with n_jobs."""
+
+    def test_n_jobs_parallel(self, binary_data: tuple) -> None:
+        X_train, X_test, y_train, y_test = binary_data
+        clf = TowerGBClassifier(n_passes=4, max_iter=50, n_jobs=2, random_state=42)
+        clf.fit(X_train, y_train)
+        assert clf.score(X_test, y_test) > 0.5
+
+
 class TestStringTargets:
     """Test using text words as labels like cat, dog, bird."""
 

@@ -54,7 +54,22 @@ Here is the exact journey your data takes from start to finish:
 
 ---
 
-## 3. Tour of the Files (How the Code is Written)
+## 3. Flagship Enterprise Features
+
+TowerGB includes 4 powerful features found in top-tier machine learning libraries:
+
+1. **Feature Importances (`clf.feature_importances_`)**:
+   - Shows a score for each column from 0% to 100% telling you which columns were most important in making predictions.
+2. **Class Balancing (`class_weight='balanced'`)**:
+   - Automatically gives higher importance to rare categories (like finding credit card fraud where 99% of transactions are normal and 1% are fraud).
+3. **L2 Regularization (`l2_reg=1e-4`)**:
+   - Keeps model weights small and tidy to avoid memorizing noise when tables have hundreds of columns.
+4. **Parallel Training (`n_jobs=-1`)**:
+   - Uses all available CPU cores to train the helper rounds simultaneously.
+
+---
+
+## 4. Tour of the Files (How the Code is Written)
 
 The project is organized into clean, focused files. Here is what each file does:
 
@@ -66,11 +81,12 @@ This file contains the fast math helpers:
    - Takes raw scores (like `[2.0, 5.0, 1.0]`) and turns them into percentages that add up to 100% (like `[4%, 92%, 4%]`).
    - It subtracts the biggest number first so numbers never get too big and crash the computer.
 
-2. **`cross_entropy_loss_and_grad(X, Y_one_hot, W, temperature)`**:
+2. **`cross_entropy_loss_and_grad(X, Y_one_hot, W, temperature, l2_reg, sample_weight)`**:
    - **Loss**: Measures how big the mistake was on average. If the true answer was "Dog" but the model guessed "Cat", the loss is high.
    - **Gradient**: Tells the model which direction to turn its weights to make fewer mistakes on the next try.
+   - **Regularization & Weights**: Supports L2 weight decay and per-sample weights.
 
-3. **`compute_risk_metrics(P, Y_one_hot)`**:
+3. **`compute_risk_metrics(P, Y_one_hot, sample_weight)`**:
    - Calculates **Log-Loss** (mistake penalty).
    - Calculates **Brier Score** (distance from the true answer).
    - Calculates **Loss Variance** (checks if the model is steady across all rows or wildly guessing on some).
@@ -94,9 +110,7 @@ When an AI model says "I am 99% sure," it is often overconfident and wrong. This
 
 2. **`optimize_temperature(logits, y_indices, n_classes)`**:
    - Searches for the best **Temperature ($T$)** number between `0.1` and `10.0`.
-   - A higher temperature softens overconfident guesses.
-   - A lower temperature sharpens guesses.
-   - Uses **Golden Section Search** (a super fast method that narrows down the search window like playing the high-low guessing game).
+   - Uses **Golden Section Search** (a fast method that narrows down the search window like playing the high-low guessing game).
 
 ---
 
@@ -106,62 +120,19 @@ This is the main class you interact with: `TowerGBClassifier`.
 
 It follows the official **scikit-learn** style so anyone familiar with Python machine learning can use it immediately.
 
-Key methods inside:
-- **`__init__(...)`**: Sets your settings (number of passes, learning rate, max iterations).
-- **`.fit(X, y)`**:
-  1. Validates table data (handles numbers, text labels, and pandas DataFrames).
-  2. Runs 5 training passes with random data samples.
-  3. Records accuracy from Tower 1 and risk from Tower 2.
-  4. Runs the Arbiter to calculate the best combined weights.
-- **`.predict_proba(X)`**: Multiplies your input by the combined weights and returns percentage chances for every class.
+Key methods and attributes inside:
+- **`__init__(...)`**: Sets your settings (number of passes, learning rate, regularization, class weights, jobs).
+- **`.fit(X, y, sample_weight=None)`**: Trains the ensemble passes, computes Arbiter weights, and sets `feature_importances_` and `coef_`.
+- **`.predict_proba(X)`**: Returns percentage chances for every class.
 - **`.predict(X)`**: Picks the category with the highest percentage chance.
-- **`.calibrate(X_val, y_val)`**: Takes a test set and finds the best temperature so probabilities are honest.
-- **`.score(X, y)`**: Returns the accuracy score (for example, `0.85` means 85% correct).
+- **`.calibrate(X_val, y_val)`**: Tunes confidence temperature on validation data.
+- **`.score(X, y)`**: Returns the accuracy score.
 
 ---
 
-### 📁 `tests/` (The Safety Testers)
+## 5. How to Use It (Hands-On Code)
 
-We wrote 3 test files to make sure the code never breaks:
-
-1. **`test_engine.py`**:
-   - Tests that softmax doesn't crash even if numbers are huge ($10,000+$).
-   - Tests that chances always add up to 100%.
-   - Tests that training reduces mistakes over time.
-   - Tests that the best model gets the biggest vote in the Arbiter.
-
-2. **`test_gradcheck.py`**:
-   - Checks our math by comparing the fast formula against manual tiny step-by-step slope calculations (central finite differences).
-   - Makes sure the difference is smaller than $0.0000001$.
-
-3. **`test_estimator.py`**:
-   - Tests scikit-learn compatibility (`check_estimator`).
-   - Tests 2-class and 5-class problems.
-   - Tests text labels like `"cat"`, `"dog"`, `"bird"`.
-   - Tests pandas DataFrames.
-   - Tests saving and loading with `pickle` and `joblib`.
-   - Tests that temperature calibration improves confidence.
-
----
-
-### 📁 `benchmarks/run_benchmarks.py` (The Speed & Accuracy Race)
-
-This script creates a table of 5,000 rows and 20 columns, then races TowerGB against:
-- **LogisticRegression**
-- **RandomForest**
-- **XGBoost**
-
-It measures 4 things:
-1. **Accuracy**: How many guesses were right?
-2. **Log-Loss**: How small were the mistakes?
-3. **ECE**: How honest was the confidence score?
-4. **Latency (ms)**: How fast did it predict 1,000 rows (in milliseconds)?
-
----
-
-## 4. How to Use It (Hands-On Code)
-
-Here is how you can train and use TowerGB in just 6 lines of code:
+Here is how you can train and use TowerGB with feature importances:
 
 ```python
 from sklearn.datasets import make_classification
@@ -170,33 +141,36 @@ from towergb import TowerGBClassifier
 # 1. Create simple example data (100 rows, 4 features, 2 classes)
 X, y = make_classification(n_samples=100, n_features=4, n_classes=2, random_state=42)
 
-# 2. Create the model
-clf = TowerGBClassifier(n_passes=5, learning_rate=0.1, random_state=42)
+# 2. Create the model with L2 regularization and balanced classes
+clf = TowerGBClassifier(n_passes=5, learning_rate=0.1, l2_reg=1e-4, random_state=42)
 
 # 3. Train on data
 clf.fit(X, y)
 
-# 4. Predict categories for new rows
+# 4. Inspect feature importance
+print("Feature importances:", clf.feature_importances_)
+
+# 5. Predict categories for new rows
 predictions = clf.predict(X[:5])
 print("Guesses:", predictions)
 
-# 5. Predict probabilities (chances)
+# 6. Predict probabilities (chances)
 chances = clf.predict_proba(X[:5])
 print("Chances:", chances)
 
-# 6. Check overall accuracy
+# 7. Check overall accuracy
 print("Accuracy:", clf.score(X, y))
 ```
 
 ---
 
-## 5. Commands You Can Run in the Terminal
+## 6. Commands You Can Run in the Terminal
 
 ### Run all tests:
 ```bash
 .venv\Scripts\pytest tests/ -v
 ```
-*(All 39 tests will pass with green checkmarks!)*
+*(All 47 tests will pass with green checkmarks!)*
 
 ### Run the benchmark race:
 ```bash
@@ -208,7 +182,6 @@ print("Accuracy:", clf.score(X, y))
 .venv\Scripts\ruff check .
 .venv\Scripts\mypy src
 ```
-*(Both will pass with 0 errors!)*
 
 ---
 
@@ -217,7 +190,9 @@ print("Accuracy:", clf.score(X, y))
 | Component | What it is | Why it matters |
 |---|---|---|
 | **Tower 1** | Accuracy Checker | Finds models that make the most correct guesses. |
-| **Tower 2** | Risk & Confidence Checker | Penalizes models that make wild or unsteady guesses. |
+| **Tower 2** | Risk & Calibration Checker | Penalizes models that make wild or unsteady guesses. |
 | **Arbiter** | The Voting Referee | Combines all models by giving the best ones more voting power. |
-| **Calibration** | Confidence Tuning | Makes sure the percentage chances match reality. |
+| **Calibration** | Confidence Tuning | Makes sure percentage chances match real accuracy. |
+| **Feature Importance** | Interpretability | Tells you which columns drove the model's decisions. |
+| **Class Balancing** | Fairness on Rare Events | Handles imbalanced datasets like fraud detection. |
 | **Single Matrix Inference** | Fast Math Trick | Blends all models into one single math step for sub-millisecond speed. |

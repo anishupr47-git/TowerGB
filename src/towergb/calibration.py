@@ -16,7 +16,13 @@ def compute_ece(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 15) -> flo
     y_true_arr = np.asarray(y_true).ravel()
     confidences = np.max(y_prob, axis=1)
     predictions = np.argmax(y_prob, axis=1)
-    correct = (predictions == y_true_arr).astype(np.float64)
+
+    if y_true_arr.dtype.kind not in ("i", "u", "b"):
+        _, y_true_idx = np.unique(y_true_arr, return_inverse=True)
+    else:
+        y_true_idx = y_true_arr.astype(np.intp)
+
+    correct = (predictions == y_true_idx).astype(np.float64)
 
     bin_boundaries = np.linspace(0.0, 1.0, n_bins + 1)
     bin_indices = np.digitize(confidences, bin_boundaries[1:-1])
@@ -57,4 +63,7 @@ def optimize_temperature(logits: np.ndarray, y_indices: np.ndarray, n_classes: i
             d = a + (b - a) / PHI
             fd = ece_at_temp(d)
 
-    return (a + b) / 2.0
+    best_T = (a + b) / 2.0
+    if ece_at_temp(1.0) <= ece_at_temp(best_T):
+        return 1.0
+    return best_T
