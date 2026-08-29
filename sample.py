@@ -1,10 +1,17 @@
-import numpy as np
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Ensure src/ is in Python path even if run with global python
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from towergb import TowerGBClassifier
 
-# 1. Create employee dataset
+# 1. Create employee training dataset
 data = {
     "Name": [
         "Aarav Sharma", "Bianca Vance", "Carlos Mendez", "Divya Patel",
@@ -60,8 +67,8 @@ clf = TowerGBClassifier(
 )
 clf.fit(X_train_scaled, y_train)
 
-# 6. Helper function to predict promotion and project new earnings
-def evaluate_employee(name: str, salary: float, experience: int, performance: int) -> dict:
+
+def evaluate_employee(name: str, salary: float, experience: float, performance: float) -> dict:
     """Predict promotion chance and project expected new salary earnings."""
     emp_df = pd.DataFrame({
         "Salary": [salary],
@@ -75,12 +82,9 @@ def evaluate_employee(name: str, salary: float, experience: int, performance: in
     yes_idx = list(clf.classes_).index("Yes")
     promotion_chance = float(proba[yes_idx])
 
-    # Calculate raise percentage based on promotion & performance
     if pred == "Yes":
-        # Promotion raise: base 15% + up to 10% extra based on high performance
         raise_percent = 0.15 + (performance / 10.0) * 0.10
     else:
-        # Standard annual adjustment: 3% to 5% based on performance
         raise_percent = 0.03 + (performance / 10.0) * 0.02
 
     projected_salary = salary * (1.0 + raise_percent)
@@ -99,39 +103,51 @@ def evaluate_employee(name: str, salary: float, experience: int, performance: in
     }
 
 
-print("=" * 65)
-print("   TowerGB Employee Promotion & Earnings Predictor")
-print("=" * 65)
-
-print(f"\n[+] Trained on {len(X_train)} employees | Test Accuracy: {clf.score(X_test_scaled, y_test) * 100:.1f}%")
-
-print("\n[+] Feature Importances:")
-for col, imp in zip(feature_cols, clf.feature_importances_):
-    print(f"    - {col:<26}: {imp * 100:.1f}%")
-
-# 7. Evaluate sample candidates
-candidates = [
-    ("Anish (You)", 85000, 5, 9),
-    ("Sarah Jenkins", 55000, 3, 6),
-    ("David Miller", 110000, 9, 8),
-]
-
-print("\n" + "=" * 65)
-print("   PROMOTION & PROJECTED SALARY REPORT")
-print("=" * 65)
-
-for name, sal, exp, perf in candidates:
-    res = evaluate_employee(name, sal, exp, perf)
+def print_result(res: dict) -> None:
     status_icon = "[PROMOTED]" if res["promoted"] == "Yes" else "[NOT PROMOTED]"
-
-    print(f"\nCandidate: {res['name']}")
+    print("\n" + "-" * 55)
+    print(f"  PROMOTION & SALARY REPORT FOR: {res['name'].upper()}")
+    print("-" * 55)
     print(f"  - Current Salary   : ${res['current_salary']:,.2f}")
     print(f"  - Experience       : {res['experience']} years | Performance: {res['performance']}/10")
     print(f"  - Promotion Status : {status_icon} ({res['promoted']})")
     print(f"  - Promotion Chance : {res['promotion_chance']:.1f}%")
     print(f"  - Projected Raise  : +{res['raise_percent']:.1f}% (+${res['raise_amount']:,.2f})")
     print(f"  - NEW EARNINGS     : ${res['projected_salary']:,.2f} / year")
+    print("-" * 55 + "\n")
 
-print("\n" + "=" * 65)
-print("Tip: Add any name, salary, and experience to candidates in sample.py!")
-print("=" * 65 + "\n")
+
+def interactive_session() -> None:
+    print("=" * 65)
+    print("   TowerGB Interactive Promotion & Earnings Predictor")
+    print("=" * 65)
+    print(f"[+] Model trained on {len(X_train)} rows | Accuracy: {clf.score(X_test_scaled, y_test) * 100:.1f}%\n")
+
+    while True:
+        try:
+            name_input = input("Enter Name (or press Enter for 'Anish'): ").strip()
+            name = name_input if name_input else "Anish"
+
+            sal_input = input("Enter Current Salary (e.g. 75000): ").strip().replace("$", "").replace(",", "")
+            salary = float(sal_input) if sal_input else 75000.0
+
+            exp_input = input("Enter Years of Experience (e.g. 5): ").strip()
+            experience = float(exp_input) if exp_input else 5.0
+
+            perf_input = input("Enter Performance Score 1-10 (e.g. 8): ").strip()
+            performance = float(perf_input) if perf_input else 8.0
+
+            res = evaluate_employee(name, salary, experience, performance)
+            print_result(res)
+
+            again = input("Would you like to test another profile? (y/n): ").strip().lower()
+            if again not in ("y", "yes"):
+                print("\nThank you for using TowerGB! Goodbye.\n")
+                break
+        except (ValueError, KeyboardInterrupt):
+            print("\nExiting session. Goodbye!")
+            break
+
+
+if __name__ == "__main__":
+    interactive_session()
