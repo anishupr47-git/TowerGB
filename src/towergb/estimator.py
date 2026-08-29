@@ -23,18 +23,9 @@ from towergb.calibration import optimize_temperature
 
 
 def _train_single_pass(
-    pass_idx: int,
-    X: np.ndarray,
-    Y_one_hot: np.ndarray,
-    y_idx: np.ndarray,
-    sample_weight: np.ndarray | None,
-    subsample_ratio: float,
-    max_iter: int,
-    learning_rate: float,
-    temperature: float,
-    l2_reg: float,
-    tol: float,
-    seed: int | None,
+    pass_idx: int, X: np.ndarray, Y_one_hot: np.ndarray, y_idx: np.ndarray,
+    sample_weight: np.ndarray | None, subsample_ratio: float, max_iter: int,
+    learning_rate: float, temperature: float, l2_reg: float, tol: float, seed: int | None,
 ) -> tuple[np.ndarray, int, dict[str, float]]:
     N, D = X.shape
     K = Y_one_hot.shape[1]
@@ -45,26 +36,21 @@ def _train_single_pass(
     D_ext = D + 1
 
     if subsample_ratio >= 1.0:
-        X_sub = X_ext
-        Y_sub = Y_one_hot
-        sw_sub = sample_weight
+        X_sub, Y_sub, sw_sub = X_ext, Y_one_hot, sample_weight
     else:
         n_sub = max(1, int(N * subsample_ratio))
         indices = rng.choice(N, size=n_sub, replace=True)
-        X_sub = X_ext[indices]
-        Y_sub = Y_one_hot[indices]
+        X_sub, Y_sub = X_ext[indices], Y_one_hot[indices]
         sw_sub = sample_weight[indices] if sample_weight is not None else None
 
     std = np.sqrt(2.0 / (D_ext + K)) if (D_ext + K) > 0 else 0.01
     W = (rng.randn(D_ext, K) * std).astype(np.float64)
 
-    prev_loss = np.inf
-    n_iters = 0
+    prev_loss, n_iters = np.inf, 0
     for _it in range(max_iter):
         loss, grad = cross_entropy_loss_and_grad(X_sub, Y_sub, W, temperature, l2_reg, sw_sub)
         W -= learning_rate * grad
         n_iters = _it + 1
-
         if abs(prev_loss - loss) < tol:
             break
         prev_loss = loss
@@ -89,17 +75,10 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
     """Calibrated ensemble classifier for tabular data with feature importances and class weighting."""
 
     def __init__(
-        self,
-        n_passes: int = 5,
-        learning_rate: float = 0.1,
-        max_iter: int = 300,
-        temperature: float = 1.0,
-        l2_reg: float = 1e-4,
-        subsample_ratio: float = 1.0,
-        class_weight: str | dict[object, float] | None = None,
-        tol: float = 1e-6,
-        random_state: int | None = None,
-        arbiter_weights: dict[str, float] | None = None,
+        self, n_passes: int = 5, learning_rate: float = 0.1, max_iter: int = 300,
+        temperature: float = 1.0, l2_reg: float = 1e-4, subsample_ratio: float = 1.0,
+        class_weight: str | dict[object, float] | None = None, tol: float = 1e-6,
+        random_state: int | None = None, arbiter_weights: dict[str, float] | None = None,
         n_jobs: int | None = None,
     ) -> None:
         self.n_passes = n_passes
@@ -117,27 +96,17 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
     def fit(self, X: np.ndarray, y: np.ndarray, sample_weight: np.ndarray | None = None) -> TowerGBClassifier:
         """Learn patterns from training data and labels."""
         if _validate_data is not None:
-            X, y = _validate_data(
-                self, X, y, accept_sparse=False, dtype=np.float64,
-                multi_output=False, ensure_2d=True, reset=True,
-            )
+            X, y = _validate_data(self, X, y, accept_sparse=False, dtype=np.float64, multi_output=False, ensure_2d=True, reset=True)
         else:
-            X, y = check_X_y(
-                X, y, accept_sparse=False, dtype=np.float64,
-                multi_output=False, ensure_2d=True,
-            )
+            X, y = check_X_y(X, y, accept_sparse=False, dtype=np.float64, multi_output=False, ensure_2d=True)
 
         target_type = type_of_target(y)
         if target_type not in ("binary", "multiclass"):
-            raise ValueError(
-                f"Unknown label type: '{target_type}'. "
-                "TowerGBClassifier requires discrete target labels."
-            )
+            raise ValueError(f"Unknown label type: '{target_type}'. TowerGBClassifier requires discrete target labels.")
 
         X = np.ascontiguousarray(X, dtype=np.float64)
         self.classes_ = unique_labels(y)
         K = len(self.classes_)
-
         self._label_to_idx = {label: idx for idx, label in enumerate(self.classes_)}
         y_idx = np.array([self._label_to_idx[label] for label in y], dtype=np.intp)
 
@@ -163,37 +132,31 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
             if np.all(sw == 0) or np.sum(sw) == 0:
                 raise ValueError("Sample weights sum to zero.")
 
-        arb_weights = (
-            dict(self.arbiter_weights) if self.arbiter_weights is not None
-            else {"accuracy": 1.0, "log_loss": 0.5, "brier": 0.5, "loss_var": 0.3}
-        )
+        arb_weights = dict(self.arbiter_weights) if self.arbiter_weights is not None else {"accuracy": 1.0, "log_loss": 0.5, "brier": 0.5, "loss_var": 0.3}
 
         if self.n_jobs is not None and self.n_jobs != 1:
             try:
                 from joblib import Parallel, delayed
                 results = Parallel(n_jobs=self.n_jobs)(
                     delayed(_train_single_pass)(
-                        m, X, Y_one_hot, y_idx, sw,
-                        self.subsample_ratio, self.max_iter, self.learning_rate,
-                        self.temperature, self.l2_reg, self.tol, self.random_state,
+                        m, X, Y_one_hot, y_idx, sw, self.subsample_ratio, self.max_iter,
+                        self.learning_rate, self.temperature, self.l2_reg, self.tol, self.random_state,
                     )
                     for m in range(self.n_passes)
                 )
             except (ImportError, RuntimeError, OSError):
                 results = [
                     _train_single_pass(
-                        m, X, Y_one_hot, y_idx, sw,
-                        self.subsample_ratio, self.max_iter, self.learning_rate,
-                        self.temperature, self.l2_reg, self.tol, self.random_state,
+                        m, X, Y_one_hot, y_idx, sw, self.subsample_ratio, self.max_iter,
+                        self.learning_rate, self.temperature, self.l2_reg, self.tol, self.random_state,
                     )
                     for m in range(self.n_passes)
                 ]
         else:
             results = [
                 _train_single_pass(
-                    m, X, Y_one_hot, y_idx, sw,
-                    self.subsample_ratio, self.max_iter, self.learning_rate,
-                    self.temperature, self.l2_reg, self.tol, self.random_state,
+                    m, X, Y_one_hot, y_idx, sw, self.subsample_ratio, self.max_iter,
+                    self.learning_rate, self.temperature, self.l2_reg, self.tol, self.random_state,
                 )
                 for m in range(self.n_passes)
             ]
@@ -201,7 +164,6 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
         self._pass_weights = [r[0] for r in results]
         self.n_iter_ = np.array([r[1] for r in results], dtype=np.intp)
         self._pass_metrics = [r[2] for r in results]
-
         self._ensemble_weights = pareto_arbiter(self._pass_metrics, arb_weights)
 
         W_stack = np.stack(self._pass_weights, axis=0)
@@ -209,20 +171,13 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
         self._W_ensemble = np.sum(alpha * W_stack, axis=0)
         self.temperature_ = self.temperature
 
-        W_weights = self._W_ensemble[:-1]
-        W_bias = self._W_ensemble[-1]
-
-        if K == 2:
-            self.coef_ = W_weights.T[1:2]
-            self.intercept_ = W_bias[1:2]
-        else:
-            self.coef_ = W_weights.T
-            self.intercept_ = W_bias
+        W_weights, W_bias = self._W_ensemble[:-1], self._W_ensemble[-1]
+        self.coef_ = W_weights.T[1:2] if K == 2 else W_weights.T
+        self.intercept_ = W_bias[1:2] if K == 2 else W_bias
 
         raw_imp = np.mean(np.abs(W_weights), axis=1)
         imp_sum = float(np.sum(raw_imp))
         self.feature_importances_ = raw_imp / imp_sum if imp_sum > 0 else np.full(D, 1.0 / D)
-
         return self
 
     def _raw_logits(self, X: np.ndarray) -> np.ndarray:
@@ -232,11 +187,7 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
         else:
             X = check_array(X, accept_sparse=False, dtype=np.float64)
             if X.shape[1] != self.n_features_in_:
-                raise ValueError(
-                    f"X has {X.shape[1]} features, but "
-                    f"{self.__class__.__name__} is expecting "
-                    f"{self.n_features_in_} features as input."
-                )
+                raise ValueError(f"X has {X.shape[1]} features, but {self.__class__.__name__} is expecting {self.n_features_in_} features.")
         X = np.ascontiguousarray(X)
         X_ext = np.hstack([X, np.ones((X.shape[0], 1), dtype=np.float64)])
         return np.asarray(X_ext @ self._W_ensemble, dtype=np.float64)
@@ -263,7 +214,6 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
         y_val_arr = np.asarray(y_val)
         y_idx = np.array([self._label_to_idx[label] for label in y_val_arr], dtype=np.intp)
         logits = self._raw_logits(X_val)
-
         self.temperature_ = optimize_temperature(logits, y_idx, len(self.classes_))
         return self
 
