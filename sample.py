@@ -1,9 +1,10 @@
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from towergb import TowerGBClassifier
 
-# 1. Create employee promotion dataset
+# 1. Create employee dataset
 data = {
     "Name": [
         "Aarav Sharma", "Bianca Vance", "Carlos Mendez", "Divya Patel",
@@ -34,27 +35,22 @@ data = {
 
 df = pd.DataFrame(data)
 
-# 2. Pick numerical features to learn from and target category
+# 2. Features and target
 feature_cols = ["Salary", "Experience (Years)", "Performance Score (1-10)"]
 X = df[feature_cols]
 y = df["Promoted"]
 
-# 3. Split into training (80%) and testing (20%) data
+# 3. Train/Test split
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.25, random_state=42, stratify=y
 )
 
-# 4. Standardize numerical features so all columns are on the same scale
+# 4. Standardize features
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
-print("=" * 60)
-print("  TowerGB Employee Promotion Prediction")
-print("=" * 60)
-print(f"\nTraining on {len(X_train)} employees, testing on {len(X_test)} employees.\n")
-
-# 5. Create and train TowerGB model
+# 5. Train TowerGB model
 clf = TowerGBClassifier(
     n_passes=5,
     learning_rate=0.1,
@@ -64,45 +60,78 @@ clf = TowerGBClassifier(
 )
 clf.fit(X_train_scaled, y_train)
 
-# 6. Check test accuracy
-accuracy = clf.score(X_test_scaled, y_test)
-print(f"[+] Test Accuracy: {accuracy * 100:.1f}%\n")
+# 6. Helper function to predict promotion and project new earnings
+def evaluate_employee(name: str, salary: float, experience: int, performance: int) -> dict:
+    """Predict promotion chance and project expected new salary earnings."""
+    emp_df = pd.DataFrame({
+        "Salary": [salary],
+        "Experience (Years)": [experience],
+        "Performance Score (1-10)": [performance],
+    })
+    emp_scaled = scaler.transform(emp_df)
 
-# 7. Check feature importances (which column mattered most)
-print("[+] Feature Importances:")
+    pred = clf.predict(emp_scaled)[0]
+    proba = clf.predict_proba(emp_scaled)[0]
+    yes_idx = list(clf.classes_).index("Yes")
+    promotion_chance = float(proba[yes_idx])
+
+    # Calculate raise percentage based on promotion & performance
+    if pred == "Yes":
+        # Promotion raise: base 15% + up to 10% extra based on high performance
+        raise_percent = 0.15 + (performance / 10.0) * 0.10
+    else:
+        # Standard annual adjustment: 3% to 5% based on performance
+        raise_percent = 0.03 + (performance / 10.0) * 0.02
+
+    projected_salary = salary * (1.0 + raise_percent)
+    raise_amount = projected_salary - salary
+
+    return {
+        "name": name,
+        "current_salary": salary,
+        "experience": experience,
+        "performance": performance,
+        "promoted": pred,
+        "promotion_chance": promotion_chance * 100.0,
+        "raise_percent": raise_percent * 100.0,
+        "raise_amount": raise_amount,
+        "projected_salary": projected_salary,
+    }
+
+
+print("=" * 65)
+print("   TowerGB Employee Promotion & Earnings Predictor")
+print("=" * 65)
+
+print(f"\n[+] Trained on {len(X_train)} employees | Test Accuracy: {clf.score(X_test_scaled, y_test) * 100:.1f}%")
+
+print("\n[+] Feature Importances:")
 for col, imp in zip(feature_cols, clf.feature_importances_):
     print(f"    - {col:<26}: {imp * 100:.1f}%")
 
-# 8. Make predictions on test employees
-print("\n[+] Test Set Predictions:")
-preds = clf.predict(X_test_scaled)
-probas = clf.predict_proba(X_test_scaled)
+# 7. Evaluate sample candidates
+candidates = [
+    ("Anish (You)", 85000, 5, 9),
+    ("Sarah Jenkins", 55000, 3, 6),
+    ("David Miller", 110000, 9, 8),
+]
 
-test_names = df.loc[X_test.index, "Name"].values
-for name, actual, pred, proba in zip(test_names, y_test, preds, probas):
-    yes_idx = list(clf.classes_).index("Yes")
-    yes_chance = proba[yes_idx] * 100
-    print(
-        f"    - {name:<18} | Actual: {actual:<3} | Predicted: {pred:<3} "
-        f"| Promotion Chance: {yes_chance:.1f}%"
-    )
+print("\n" + "=" * 65)
+print("   PROMOTION & PROJECTED SALARY REPORT")
+print("=" * 65)
 
-# 9. Predict on a new unseen employee
-print("\n" + "=" * 60)
-print("  Predicting on New Unseen Employee")
-print("=" * 60)
+for name, sal, exp, perf in candidates:
+    res = evaluate_employee(name, sal, exp, perf)
+    status_icon = "[PROMOTED]" if res["promoted"] == "Yes" else "[NOT PROMOTED]"
 
-new_employee = pd.DataFrame({
-    "Salary": [88000],
-    "Experience (Years)": [6],
-    "Performance Score (1-10)": [9],
-})
+    print(f"\nCandidate: {res['name']}")
+    print(f"  - Current Salary   : ${res['current_salary']:,.2f}")
+    print(f"  - Experience       : {res['experience']} years | Performance: {res['performance']}/10")
+    print(f"  - Promotion Status : {status_icon} ({res['promoted']})")
+    print(f"  - Promotion Chance : {res['promotion_chance']:.1f}%")
+    print(f"  - Projected Raise  : +{res['raise_percent']:.1f}% (+${res['raise_amount']:,.2f})")
+    print(f"  - NEW EARNINGS     : ${res['projected_salary']:,.2f} / year")
 
-new_employee_scaled = scaler.transform(new_employee)
-pred_new = clf.predict(new_employee_scaled)[0]
-proba_new = clf.predict_proba(new_employee_scaled)[0]
-yes_idx = list(clf.classes_).index("Yes")
-
-print(f"\nProfile: Salary=$88,000, Experience=6 yrs, Performance=9/10")
-print(f"Prediction: {pred_new}")
-print(f"Promotion Chance: {proba_new[yes_idx] * 100:.1f}%\n")
+print("\n" + "=" * 65)
+print("Tip: Add any name, salary, and experience to candidates in sample.py!")
+print("=" * 65 + "\n")
