@@ -51,7 +51,10 @@ def compute_nan_stats(
             else:
                 col_means[j] = 0.0
     else:
-        col_means = np.nanmean(X, axis=0)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            col_means = np.nanmean(X, axis=0)
         col_means = np.where(np.isnan(col_means), 0.0, col_means)
     return col_means, col_has_nan
 
