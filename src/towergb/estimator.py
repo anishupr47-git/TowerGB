@@ -15,8 +15,9 @@ and the exact mathematical formulas.
 from __future__ import annotations
 
 import inspect
-import numpy as np
+from typing import Any
 
+import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.multiclass import type_of_target, unique_labels
 from sklearn.utils.validation import check_array, check_is_fitted, check_X_y
@@ -264,7 +265,7 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
         self.early_stop_fraction = early_stop_fraction
         self.handle_missing = handle_missing
 
-    def __sklearn_tags__(self):
+    def __sklearn_tags__(self) -> object:
         tags = super().__sklearn_tags__()
         tags.input_tags.allow_nan = bool(self.handle_missing)
         return tags
@@ -398,6 +399,28 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
                 "TowerGBClassifier requires discrete target labels."
             )
 
+        # --- Validate hyperparameters ----------------------------------------
+        if self.n_passes < 1:
+            raise ValueError(f"n_passes must be >= 1, got {self.n_passes}")
+        if self.max_iter < 1:
+            raise ValueError(f"max_iter must be >= 1, got {self.max_iter}")
+        if not 0.0 < self.learning_rate <= 10.0:
+            raise ValueError(
+                f"learning_rate must be in (0, 10], got {self.learning_rate}"
+            )
+        if not 0.0 < self.subsample_ratio <= 1.0:
+            raise ValueError(
+                f"subsample_ratio must be in (0, 1], got {self.subsample_ratio}"
+            )
+        if self.l2_reg < 0.0:
+            raise ValueError(f"l2_reg must be >= 0, got {self.l2_reg}")
+        if self.temperature <= 0.0:
+            raise ValueError(f"temperature must be > 0, got {self.temperature}")
+        if not 0.0 <= self.early_stop_fraction < 1.0:
+            raise ValueError(
+                f"early_stop_fraction must be in [0, 1), got {self.early_stop_fraction}"
+            )
+
         self.classes_ = unique_labels(y)
         K = len(self.classes_)
         N = X.shape[0]
@@ -434,13 +457,17 @@ class TowerGBClassifier(ClassifierMixin, BaseEstimator):
         )
 
         # --- Parallel / Sequential Pass Training -----------------------------
-        pass_kwargs: dict = dict(
-            subsample_ratio=self.subsample_ratio, max_iter=self.max_iter,
-            learning_rate=self.learning_rate, temperature=self.temperature,
-            l2_reg=self.l2_reg, tol=self.tol, seed=self.random_state,
-            max_grad_norm=self.max_grad_norm,
-            early_stop_fraction=self.early_stop_fraction,
-        )
+        pass_kwargs: dict[str, Any] = {
+            "subsample_ratio": self.subsample_ratio,
+            "max_iter": self.max_iter,
+            "learning_rate": self.learning_rate,
+            "temperature": self.temperature,
+            "l2_reg": self.l2_reg,
+            "tol": self.tol,
+            "seed": self.random_state,
+            "max_grad_norm": self.max_grad_norm,
+            "early_stop_fraction": self.early_stop_fraction,
+        }
 
         if self.n_jobs is not None and self.n_jobs != 1:
             try:

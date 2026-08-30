@@ -6,7 +6,6 @@ epistemic uncertainty, and NaN handling.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from towergb import TowerGBClassifier
 

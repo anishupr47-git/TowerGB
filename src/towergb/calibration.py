@@ -128,7 +128,7 @@ def optimize_temperature(
 
 def vector_scale_calibration(
     logits: np.ndarray, y_indices: np.ndarray, n_classes: int,
-    max_iter: int = 200, lr: float = 0.01,
+    max_iter: int = 200, lr: float = 0.01, tol: float = 1e-7,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Learn per-class scale (a_k) and shift (b_k) parameters to calibrate probabilities.
 
@@ -160,8 +160,10 @@ def vector_scale_calibration(
     a = np.ones(K, dtype=np.float64)
     b = np.zeros(K, dtype=np.float64)
     N = len(y_indices)
-    Y_one_hot = np.eye(K, dtype=np.float64)[y_idx if "y_idx" in locals() else y_indices]
+    _EPS = 1e-15
+    Y_one_hot = np.eye(K, dtype=np.float64)[y_indices]
 
+    prev_nll = np.inf
     for _ in range(max_iter):
         cal_logits = logits * a + b
         P = stable_softmax(cal_logits, temperature=1.0)
@@ -170,5 +172,11 @@ def vector_scale_calibration(
         grad_b = np.sum(residual, axis=0)
         a -= lr * grad_a
         b -= lr * grad_b
+
+        # Convergence check to avoid wasted iterations
+        nll = float(-np.sum(Y_one_hot * np.log(np.maximum(P, _EPS))) / N)
+        if abs(prev_nll - nll) < tol:
+            break
+        prev_nll = nll
 
     return a, b

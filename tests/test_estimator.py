@@ -331,3 +331,134 @@ class TestErrorHandling:
         clf = TowerGBClassifier()
         with pytest.raises(ValueError, match="Unknown label type"):
             clf.fit(X, y)
+
+
+class TestParameterValidation:
+    """Test that invalid hyperparameters raise clear errors."""
+
+    def test_invalid_n_passes(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(n_passes=0)
+        with pytest.raises(ValueError, match="n_passes"):
+            clf.fit(X, y)
+
+    def test_invalid_max_iter(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(max_iter=0)
+        with pytest.raises(ValueError, match="max_iter"):
+            clf.fit(X, y)
+
+    def test_invalid_learning_rate(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(learning_rate=-0.1)
+        with pytest.raises(ValueError, match="learning_rate"):
+            clf.fit(X, y)
+
+    def test_invalid_subsample_ratio(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(subsample_ratio=1.5)
+        with pytest.raises(ValueError, match="subsample_ratio"):
+            clf.fit(X, y)
+
+    def test_invalid_l2_reg(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(l2_reg=-0.01)
+        with pytest.raises(ValueError, match="l2_reg"):
+            clf.fit(X, y)
+
+    def test_invalid_temperature(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(temperature=0.0)
+        with pytest.raises(ValueError, match="temperature"):
+            clf.fit(X, y)
+
+    def test_invalid_early_stop_fraction(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(early_stop_fraction=1.0)
+        with pytest.raises(ValueError, match="early_stop_fraction"):
+            clf.fit(X, y)
+
+    def test_zero_sample_weight_raises(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier()
+        with pytest.raises(ValueError, match="zero"):
+            clf.fit(X, y, sample_weight=np.zeros(2))
+
+    def test_wrong_sample_weight_shape_raises(self) -> None:
+        X = np.array([[1, 2], [3, 4]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier()
+        with pytest.raises(ValueError, match="sample_weight"):
+            clf.fit(X, y, sample_weight=np.ones(5))
+
+
+class TestAdversarialAndSecurityInputs:
+    """Test robustness against extreme, adversarial, and edge-case inputs."""
+
+    def test_all_nan_column(self) -> None:
+        """Model should handle a column that is entirely NaN."""
+        rng = np.random.RandomState(42)
+        X = rng.randn(50, 3)
+        X[:, 2] = np.nan  # Entire column missing
+        y = (X[:, 0] > 0).astype(int)
+        clf = TowerGBClassifier(handle_missing=True, random_state=42)
+        clf.fit(X, y)
+        proba = clf.predict_proba(X)
+        assert np.all(np.isfinite(proba))
+
+    def test_extreme_feature_values(self) -> None:
+        """Model should not produce NaN/Inf on very large feature values."""
+        X = np.array([[1e10, -1e10], [-1e10, 1e10]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(max_grad_norm=1.0, random_state=42)
+        clf.fit(X, y)
+        proba = clf.predict_proba(X)
+        assert np.all(np.isfinite(proba))
+        np.testing.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-12)
+
+    def test_single_sample_per_class(self) -> None:
+        """Minimum viable training: exactly one sample per class."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+        y = np.array([0, 1])
+        clf = TowerGBClassifier(n_passes=2, max_iter=20, random_state=42)
+        clf.fit(X, y)
+        pred = clf.predict(X)
+        assert len(pred) == 2
+
+    def test_feature_mismatch_at_predict(self) -> None:
+        """Predict with wrong number of features should raise ValueError."""
+        rng = np.random.RandomState(42)
+        X_train = rng.randn(50, 5)
+        y = rng.randint(0, 2, size=50)
+        clf = TowerGBClassifier(n_passes=2, max_iter=20, random_state=42)
+        clf.fit(X_train, y)
+        with pytest.raises(ValueError):
+            clf.predict(rng.randn(10, 3))
+
+    def test_constant_features(self) -> None:
+        """All-constant features (zero std) should not cause division by zero."""
+        X = np.ones((50, 3), dtype=np.float64)
+        y = np.array([0] * 25 + [1] * 25)
+        clf = TowerGBClassifier(normalize=True, random_state=42)
+        clf.fit(X, y)
+        proba = clf.predict_proba(X)
+        assert np.all(np.isfinite(proba))
+
+    def test_large_n_classes(self) -> None:
+        """Ensure stability with many classes."""
+        rng = np.random.RandomState(42)
+        X = rng.randn(200, 10)
+        y = rng.randint(0, 20, size=200)
+        clf = TowerGBClassifier(n_passes=2, max_iter=50, random_state=42)
+        clf.fit(X, y)
+        proba = clf.predict_proba(X)
+        assert proba.shape == (200, 20)
+        np.testing.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-12)

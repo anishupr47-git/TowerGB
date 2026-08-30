@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Missing Value (NaN) Handling
 # ---------------------------------------------------------------------------
@@ -138,7 +137,7 @@ def apply_standardizer(X: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.n
     -----------
     Z_{ij} = (X_{ij} - μ_j) / σ_j
     """
-    return (X - mean) / std
+    return np.asarray((X - mean) / std, dtype=np.float64)
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +170,7 @@ def expand_polynomial(
         (X_expanded, feature_map)
         where feature_map tracks which original feature index produced each expanded column.
     """
-    N, D = X.shape
+    _N, D = X.shape
     feature_map: list[tuple[int, ...]] = [(i,) for i in range(D)]
 
     if degree < 2:
