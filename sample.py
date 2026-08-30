@@ -1,154 +1,74 @@
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 
-# Ensure src/ is in Python path even if run with global python
+# Add src directory to Python path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import log_loss
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-
+from xgboost import XGBClassifier
 from towergb import TowerGBClassifier
 
-# 1. Create employee training dataset
-data = {
-    "Name": [
-        "Aarav Sharma", "Bianca Vance", "Carlos Mendez", "Divya Patel",
-        "Ethan Walker", "Fatima Al-Mansoor", "George Chen", "Hannah Abbott",
-        "Ian Kowalski", "Julia Santos", "Kevin O'Connor", "Layla Hassan",
-    ],
-    "Salary": [
-        45000, 92000, 61000, 38000,
-        115000, 74000, 52000, 49000,
-        83000, 102000, 41000, 68000,
-    ],
-    "Experience (Years)": [
-        2, 7, 4, 1,
-        10, 5, 3, 2,
-        6, 8, 1, 4,
-    ],
-    "Performance Score (1-10)": [
-        6, 9, 7, 5,
-        8, 8, 4, 7,
-        6, 9, 4, 8,
-    ],
-    "Promoted": [
-        "No", "Yes", "Yes", "No",
-        "Yes", "Yes", "No", "No",
-        "Yes", "Yes", "No", "Yes",
-    ],
-}
+# 1. Generate standard 10,000-row medical dataset
+rng = np.random.RandomState(42)
+N = 10000
 
-df = pd.DataFrame(data)
+age = rng.randint(20, 80, size=N)
+bp = rng.randint(90, 180, size=N)
+chol = rng.randint(150, 350, size=N)
+hr = rng.randint(100, 200, size=N)
+ecg = rng.choice([0, 1, 2], size=N)
 
-# 2. Features and target
-feature_cols = ["Salary", "Experience (Years)", "Performance Score (1-10)"]
-X = df[feature_cols]
-y = df["Promoted"]
+# Standard risk score formula
+risk_score = (
+    0.04 * (age - 50)
+    + 0.03 * (bp - 130)
+    + 0.02 * (chol - 200)
+    - 0.02 * (hr - 150)
+    + rng.randn(N) * 2.0
+)
+y = (risk_score > 0).astype(int)
 
-# 3. Train/Test split
+df = pd.DataFrame({
+    "Age": age,
+    "Blood Pressure (Systolic)": bp,
+    "Cholesterol (mg/dL)": chol,
+    "Max Heart Rate": hr,
+    "Resting ECG": ecg,
+})
+feature_cols = ["Age", "Blood Pressure (Systolic)", "Cholesterol (mg/dL)", "Max Heart Rate", "Resting ECG"]
+
+# 2. Train / Test Split (80% Train, 20% Test)
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.25, random_state=42, stratify=y
+    df[feature_cols], y, test_size=0.2, random_state=42
 )
 
-# 4. Standardize features
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+# 3. Train Model 1: TowerGB
+clf_tgb = TowerGBClassifier(random_state=42)
+clf_tgb.fit(X_train, y_train)
 
-# 5. Train TowerGB model
-clf = TowerGBClassifier(
-    n_passes=5,
-    learning_rate=0.1,
-    l2_reg=1e-4,
-    class_weight="balanced",
-    random_state=42,
-)
-clf.fit(X_train_scaled, y_train)
+# 4. Train Model 2: Logistic Regression
+clf_lr = LogisticRegression(max_iter=1000, random_state=42)
+clf_lr.fit(X_train, y_train)
 
+# 5. Train Model 3: XGBoost
+clf_xgb = XGBClassifier(random_state=42)
+clf_xgb.fit(X_train, y_train)
 
-def evaluate_employee(name: str, salary: float, experience: float, performance: float) -> dict:
-    """Predict promotion chance and project expected new salary earnings."""
-    emp_df = pd.DataFrame({
-        "Salary": [salary],
-        "Experience (Years)": [experience],
-        "Performance Score (1-10)": [performance],
-    })
-    emp_scaled = scaler.transform(emp_df)
+# 6. Evaluate and print Accuracy & Log Loss for all 3 models
+print("=== Model Comparison on 2,000 Out-of-Sample Test Rows ===")
 
-    pred = clf.predict(emp_scaled)[0]
-    proba = clf.predict_proba(emp_scaled)[0]
-    yes_idx = list(clf.classes_).index("Yes")
-    promotion_chance = float(proba[yes_idx])
+print("\n1. TowerGBClassifier:")
+print(f"   - Test Accuracy: {clf_tgb.score(X_test, y_test) * 100:.2f}%")
+print(f"   - Test Log Loss: {log_loss(y_test, clf_tgb.predict_proba(X_test)):.6f}")
 
-    if pred == "Yes":
-        raise_percent = 0.15 + (performance / 10.0) * 0.10
-    else:
-        raise_percent = 0.03 + (performance / 10.0) * 0.02
+print("\n2. Logistic Regression:")
+print(f"   - Test Accuracy: {clf_lr.score(X_test, y_test) * 100:.2f}%")
+print(f"   - Test Log Loss: {log_loss(y_test, clf_lr.predict_proba(X_test)):.6f}")
 
-    projected_salary = salary * (1.0 + raise_percent)
-    raise_amount = projected_salary - salary
-
-    return {
-        "name": name,
-        "current_salary": salary,
-        "experience": experience,
-        "performance": performance,
-        "promoted": pred,
-        "promotion_chance": promotion_chance * 100.0,
-        "raise_percent": raise_percent * 100.0,
-        "raise_amount": raise_amount,
-        "projected_salary": projected_salary,
-    }
-
-
-def print_result(res: dict) -> None:
-    status_icon = "[PROMOTED]" if res["promoted"] == "Yes" else "[NOT PROMOTED]"
-    print("\n" + "-" * 55)
-    print(f"  PROMOTION & SALARY REPORT FOR: {res['name'].upper()}")
-    print("-" * 55)
-    print(f"  - Current Salary   : ${res['current_salary']:,.2f}")
-    print(f"  - Experience       : {res['experience']} years | Performance: {res['performance']}/10")
-    print(f"  - Promotion Status : {status_icon} ({res['promoted']})")
-    print(f"  - Promotion Chance : {res['promotion_chance']:.1f}%")
-    print(f"  - Projected Raise  : +{res['raise_percent']:.1f}% (+${res['raise_amount']:,.2f})")
-    print(f"  - NEW EARNINGS     : ${res['projected_salary']:,.2f} / year")
-    print("-" * 55 + "\n")
-
-
-def interactive_session() -> None:
-    print("=" * 65)
-    print("   TowerGB Interactive Promotion & Earnings Predictor")
-    print("=" * 65)
-    print(f"[+] Model trained on {len(X_train)} rows | Accuracy: {clf.score(X_test_scaled, y_test) * 100:.1f}%\n")
-
-    while True:
-        try:
-            name_input = input("Enter Name (or press Enter for 'Anish'): ").strip()
-            name = name_input if name_input else "Anish"
-
-            sal_input = input("Enter Current Salary (e.g. 75000): ").strip().replace("$", "").replace(",", "")
-            salary = float(sal_input) if sal_input else 75000.0
-
-            exp_input = input("Enter Years of Experience (e.g. 5): ").strip()
-            experience = float(exp_input) if exp_input else 5.0
-
-            perf_input = input("Enter Performance Score 1-10 (e.g. 8): ").strip()
-            performance = float(perf_input) if perf_input else 8.0
-
-            res = evaluate_employee(name, salary, experience, performance)
-            print_result(res)
-
-            again = input("Would you like to test another profile? (y/n): ").strip().lower()
-            if again not in ("y", "yes"):
-                print("\nThank you for using TowerGB! Goodbye.\n")
-                break
-        except (ValueError, KeyboardInterrupt):
-            print("\nExiting session. Goodbye!")
-            break
-
-
-if __name__ == "__main__":
-    interactive_session()
+print("\n3. XGBoost Classifier:")
+print(f"   - Test Accuracy: {clf_xgb.score(X_test, y_test) * 100:.2f}%")
+print(f"   - Test Log Loss: {log_loss(y_test, clf_xgb.predict_proba(X_test)):.6f}")
