@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.ruff_cache/
 
 # Build and package files
 build/
@@ -16,18 +17,28 @@ MANIFEST
 .coverage.*
 .pytest_cache/
 htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
 
-# Virtual environments
+# Virtual environments & Environment variables
 .env
+.env.*
 .venv
 env/
 venv/
+ENV/
 
 # Type checker cache
 .mypy_cache/
 
-# Editor settings
+# Editor settings & OS files
 .vscode/
 .idea/
 *.swp
 *.swo
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*.log
