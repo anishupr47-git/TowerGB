@@ -2,7 +2,7 @@
 
 TowerGB is a fast, enterprise-ready machine learning model for tabular classification. It features a dual-tower ensemble architecture with built-in probability calibration, feature importance attribution, class balancing, and sub-millisecond inference.
 
-[![CI](https://github.com/anishupr47-git/TableGB/actions/workflows/ci.yml/badge.svg)](https://github.com/anishupr47-git/TableGB/actions/workflows/ci.yml)
+[![CI](https://github.com/anishupr47-git/TowerGB/actions/workflows/ci.yml/badge.svg)](https://github.com/anishupr47-git/TowerGB/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 

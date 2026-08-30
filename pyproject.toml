@@ -59,9 +59,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/anishupr47-git/TableGB"
-Repository = "https://github.com/anishupr47-git/TableGB"
-Issues = "https://github.com/anishupr47-git/TableGB/issues"
+Homepage = "https://github.com/anishupr47-git/TowerGB"
+Repository = "https://github.com/anishupr47-git/TowerGB"
+Issues = "https://github.com/anishupr47-git/TowerGB/issues"
 
 # Package source location
 [tool.setuptools.packages.find]
