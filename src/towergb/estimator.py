@@ -28,13 +28,21 @@ except ImportError:
     _validate_data = None
 
 
+# Cache the finite keyword name once at import time (deterministic per process)
+_FINITE_KW_NAME: str = (
+    "ensure_all_finite"
+    if "ensure_all_finite" in inspect.signature(check_array).parameters
+    else "force_all_finite"
+)
+
+
 def _get_finite_kwarg(allow_nan: bool) -> dict[str, str | bool]:
     """Helper to maintain backward/forward compatibility across all scikit-learn versions.
 
     SIMPLE EXPLANATION:
     -------------------
     Scikit-Learn renamed its validation keyword from 'force_all_finite' to 'ensure_all_finite'.
-    This function inspects the installed version of scikit-learn to pass the correct keyword,
+    This function uses a module-level cached lookup to pass the correct keyword,
     preventing unexpected runtime crashes.
 
     MATH LOGIC:
@@ -45,10 +53,7 @@ def _get_finite_kwarg(allow_nan: bool) -> dict[str, str | bool]:
         return {"force_all_finite": "allow-nan" if allow_nan else True}
     """
     val = "allow-nan" if allow_nan else True
-    sig = inspect.signature(check_array)
-    if "ensure_all_finite" in sig.parameters:
-        return {"ensure_all_finite": val}
-    return {"force_all_finite": val}
+    return {_FINITE_KW_NAME: val}
 
 
 from towergb._engine import (
