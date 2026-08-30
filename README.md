@@ -23,9 +23,14 @@ TowerGB works in four steps:
 
 - **Zero Heavy Dependencies**: Pure NumPy and Scikit-Learn.
 - **Sub-Millisecond Latency**: 0.09 ms per batch inference via single collapsed matrix multiplication.
+- **Automatic Missing Data Handling**: Native NaN mean-imputation and indicator feature creation (`handle_missing=True`).
+- **Polynomial Feature Expansion**: Non-linear feature interaction generation (`interaction_degree=2`).
+- **Dual Probability Calibration**: Supports global Temperature Scaling and per-class Vector (Platt) Scaling.
+- **Epistemic Uncertainty Estimation**: Measures model disagreement via `.predict_uncertainty(X)`.
 - **Feature Importances & Coefficients**: Full interpretability via `.feature_importances_`, `.coef_`, and `.intercept_`.
 - **Imbalanced Data Ready**: Built-in `class_weight='balanced'` and `sample_weight` support.
-- **L2 Regularization**: Built-in weight decay (`l2_reg`) to prevent overfitting.
+- **L2 Regularization & Gradient Clipping**: Built-in weight decay (`l2_reg`) and norm capping (`max_grad_norm`).
+- **Validation Early Stopping**: Prevents overfitting via `early_stop_fraction`.
 - **Parallel Training**: Native multi-core CPU scaling (`n_jobs=-1`).
 - **Scikit-Learn Standard**: 100% compliant with `Pipeline`, `GridSearchCV`, `cross_val_score`, and serialization.
 
@@ -35,8 +40,8 @@ TowerGB works in four steps:
 
 ```bash
 # Clone the repository
-git clone https://github.com/anishupr47-git/TableGB.git
-cd TableGB
+git clone https://github.com/anishupr47-git/TowerGB.git
+cd TowerGB
 
 # Create a virtual environment
 python -m venv .venv
@@ -65,8 +70,8 @@ X, y = make_classification(n_samples=1000, n_features=20, n_classes=3,
                            n_informative=10, random_state=42)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# 2. Create and train the model with L2 regularization and balanced weights
-clf = TowerGBClassifier(n_passes=5, learning_rate=0.1, l2_reg=1e-4, random_state=42)
+# 2. Create and train the model with L2 regularization and missing data support
+clf = TowerGBClassifier(n_passes=5, learning_rate=0.1, l2_reg=1e-4, handle_missing=True, random_state=42)
 clf.fit(X_train, y_train)
 
 # 3. Check accuracy
@@ -75,8 +80,12 @@ print(f"Accuracy: {clf.score(X_test, y_test):.4f}")
 # 4. View feature importance ranking
 print(f"Top feature importance: {clf.feature_importances_[:5]}")
 
-# 5. Tune confidence probabilities
-clf.calibrate(X_test, y_test)
+# 5. Check epistemic uncertainty (ensemble disagreement)
+uncertainty = clf.predict_uncertainty(X_test)
+print(f"Mean model uncertainty: {uncertainty.mean():.6f}")
+
+# 6. Tune confidence probabilities with vector scaling
+clf.calibrate(X_test, y_test, method="vector")
 proba = clf.predict_proba(X_test)
 print(f"Calibrated probabilities shape: {proba.shape}")
 ```
@@ -100,6 +109,11 @@ print(f"Calibrated probabilities shape: {proba.shape}")
 | `random_state` | `int \| None` | `None` | Random seed |
 | `arbiter_weights` | `dict \| None` | `None` | Multi-objective Pareto arbiter weights |
 | `n_jobs` | `int \| None` | `None` | CPU cores for parallel pass training |
+| `interaction_degree` | `int` | `1` | Degree of polynomial feature expansion (1=linear, 2=quadratic & interactions) |
+| `normalize` | `bool` | `True` | Standardize features to zero mean and unit variance |
+| `max_grad_norm` | `float \| None` | `5.0` | Maximum norm for gradient clipping |
+| `early_stop_fraction` | `float` | `0.0` | Validation set fraction for early stopping |
+| `handle_missing` | `bool` | `True` | Impute missing NaNs with column means and add indicator columns |
 
 ### Public Attributes
 
@@ -120,7 +134,8 @@ print(f"Calibrated probabilities shape: {proba.shape}")
 | `.fit(X, y, sample_weight=None)` | Train the ensemble |
 | `.predict(X)` | Predict class label |
 | `.predict_proba(X)` | Calibrated probability estimates |
-| `.calibrate(X_val, y_val)` | Post-hoc ECE temperature optimization |
+| `.predict_uncertainty(X)` | Epistemic uncertainty (ensemble disagreement variance) |
+| `.calibrate(X_val, y_val, method="temperature")` | Post-hoc ECE temperature or per-class vector scaling |
 | `.score(X, y, sample_weight=None)` | Accuracy score |
 
 ---

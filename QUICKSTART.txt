@@ -34,8 +34,8 @@ from towergb import TowerGBClassifier
 # 1. Make some sample table data (100 rows, 4 columns, 2 categories)
 X, y = make_classification(n_samples=100, n_features=4, n_classes=2, random_state=42)
 
-# 2. Create the model
-clf = TowerGBClassifier()
+# 2. Create the model (with built-in missing value handling & standardization)
+clf = TowerGBClassifier(handle_missing=True, normalize=True)
 
 # 3. Teach the model using the data
 clf.fit(X, y)
@@ -48,8 +48,20 @@ print("My guesses:", guesses)
 chances = clf.predict_proba(X[:3])
 print("My percentage chances:\n", chances)
 
-# 6. Check accuracy score (1.0 means 100% correct)
+# 6. Check how much the helper models disagree (Uncertainty)
+uncertainty = clf.predict_uncertainty(X[:3])
+print("Model disagreement score:\n", uncertainty)
+
+# 7. Check accuracy score (1.0 means 100% correct)
 print("Accuracy:", clf.score(X, y))
+
+
+COOL EXTRA FEATURES
+-------------------
+- Handles Blank/Missing Cells (NaNs): Set handle_missing=True (default).
+- Cross-Column Interactions: Set interaction_degree=2 to capture x_i * x_j features.
+- Vector Calibration: Call clf.calibrate(X_val, y_val, method="vector") for per-class tuning.
+- Epistemic Uncertainty: Call clf.predict_uncertainty(X) to measure model disagreement.
 
 
 HOW TO RUN TESTS
@@ -58,7 +70,7 @@ To make sure everything is working perfectly on your machine, run:
 
     pytest tests/ -v
 
-All 39 tests will pass with green checkmarks!
+All 69 tests will pass with green checkmarks!
 
 
 HOW TO RUN THE SPEED RACE (BENCHMARK)

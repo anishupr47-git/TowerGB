@@ -56,15 +56,23 @@ Here is the exact journey your data takes from start to finish:
 
 ## 3. Flagship Enterprise Features
 
-TowerGB includes 4 powerful features found in top-tier machine learning libraries:
+TowerGB includes 8 powerful features found in top-tier machine learning libraries:
 
 1. **Feature Importances (`clf.feature_importances_`)**:
    - Shows a score for each column from 0% to 100% telling you which columns were most important in making predictions.
-2. **Class Balancing (`class_weight='balanced'`)**:
-   - Automatically gives higher importance to rare categories (like finding credit card fraud where 99% of transactions are normal and 1% are fraud).
-3. **L2 Regularization (`l2_reg=1e-4`)**:
-   - Keeps model weights small and tidy to avoid memorizing noise when tables have hundreds of columns.
-4. **Parallel Training (`n_jobs=-1`)**:
+2. **Missing Value Handling (`handle_missing=True`)**:
+   - Fills missing cells (NaNs) with column averages and adds flag columns showing where data was missing.
+3. **Polynomial Interactions (`interaction_degree=2`)**:
+   - Creates new cross-product features (like $x_1 \times x_2$) so the model can capture non-linear patterns.
+4. **Epistemic Uncertainty (`clf.predict_uncertainty(X)`)**:
+   - Measures how much the 5 helper models disagree on each row. Higher score = model is less certain!
+5. **Dual Calibration (`method="temperature"` or `"vector"`)**:
+   - Global temperature dial or per-class Platt scaling to ensure predicted chances match real-world accuracy.
+6. **Class Balancing (`class_weight='balanced'`)**:
+   - Automatically gives higher importance to rare categories (like finding credit card fraud).
+7. **L2 Regularization (`l2_reg=1e-4`)**:
+   - Keeps model weights small and tidy to avoid memorizing noise.
+8. **Parallel Training (`n_jobs=-1`)**:
    - Uses all available CPU cores to train the helper rounds simultaneously.
 
 ---
@@ -92,7 +100,7 @@ This file contains the fast math helpers:
    - Calculates **Loss Variance** (checks if the model is steady across all rows or wildly guessing on some).
 
 4. **`pareto_arbiter(metrics_list, weights)`**:
-   - Looks at the score card for each of the 5 training rounds.
+   - Looks at the score card for each of the training rounds.
    - Gives each round a grade: `Grade = Accuracy - Mistakes - Risk`.
    - Converts those grades into voting percentages (weights) that add up to 1.
 
@@ -112,6 +120,9 @@ When an AI model says "I am 99% sure," it is often overconfident and wrong. This
    - Searches for the best **Temperature ($T$)** number between `0.1` and `10.0`.
    - Uses **Golden Section Search** (a fast method that narrows down the search window like playing the high-low guessing game).
 
+3. **`vector_scale_calibration(logits, y_indices, n_classes)`**:
+   - Tunes individual scale and shift dials ($a_k \cdot z_k + b_k$) for every class via gradient descent.
+
 ---
 
 ### 📁 `src/towergb/estimator.py` (The Main Classifier)
@@ -121,11 +132,12 @@ This is the main class you interact with: `TowerGBClassifier`.
 It follows the official **scikit-learn** style so anyone familiar with Python machine learning can use it immediately.
 
 Key methods and attributes inside:
-- **`__init__(...)`**: Sets your settings (number of passes, learning rate, regularization, class weights, jobs).
-- **`.fit(X, y, sample_weight=None)`**: Trains the ensemble passes, computes Arbiter weights, and sets `feature_importances_` and `coef_`.
+- **`__init__(...)`**: Sets your settings (number of passes, learning rate, regularization, interaction degree, class weights, jobs).
+- **`.fit(X, y, sample_weight=None)`**: Preprocesses features, trains the ensemble passes, computes Arbiter weights, collapses into one matrix, and calculates `feature_importances_`.
 - **`.predict_proba(X)`**: Returns percentage chances for every class.
 - **`.predict(X)`**: Picks the category with the highest percentage chance.
-- **`.calibrate(X_val, y_val)`**: Tunes confidence temperature on validation data.
+- **`.predict_uncertainty(X)`**: Measures how much ensemble passes disagree on predictions.
+- **`.calibrate(X_val, y_val, method="temperature")`**: Tunes confidence temperature or vector scaling on validation data.
 - **`.score(X, y)`**: Returns the accuracy score.
 
 ---
@@ -141,8 +153,8 @@ from towergb import TowerGBClassifier
 # 1. Create simple example data (100 rows, 4 features, 2 classes)
 X, y = make_classification(n_samples=100, n_features=4, n_classes=2, random_state=42)
 
-# 2. Create the model with L2 regularization and balanced classes
-clf = TowerGBClassifier(n_passes=5, learning_rate=0.1, l2_reg=1e-4, random_state=42)
+# 2. Create the model with L2 regularization, missing value handling, and balanced classes
+clf = TowerGBClassifier(n_passes=5, learning_rate=0.1, l2_reg=1e-4, handle_missing=True, random_state=42)
 
 # 3. Train on data
 clf.fit(X, y)
@@ -158,7 +170,10 @@ print("Guesses:", predictions)
 chances = clf.predict_proba(X[:5])
 print("Chances:", chances)
 
-# 7. Check overall accuracy
+# 7. Check model disagreement (uncertainty)
+print("Uncertainty:", clf.predict_uncertainty(X[:5]))
+
+# 8. Check overall accuracy
 print("Accuracy:", clf.score(X, y))
 ```
 
@@ -170,7 +185,7 @@ print("Accuracy:", clf.score(X, y))
 ```bash
 .venv\Scripts\pytest tests/ -v
 ```
-*(All 47 tests will pass with green checkmarks!)*
+*(All 69 tests will pass with green checkmarks!)*
 
 ### Run the benchmark race:
 ```bash
